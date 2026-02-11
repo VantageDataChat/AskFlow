@@ -20,7 +20,7 @@
                                 <path d="M24 14v12M24 30h.01M14 34h20a2 2 0 002-2V16a2 2 0 00-2-2H14a2 2 0 00-2 2v16a2 2 0 002 2z" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </div>
-                        <h1 data-i18n="setup_title" data-product-name>系统启动准备中</h1>
+                        <h1 data-i18n="setup_title">系统启动准备中</h1>
                     </div>
                     <p style="color:#6b7280;margin:1.5rem 0;font-size:1.05rem;line-height:1.7;" data-i18n="setup_message">系统启动准备中，请稍后...</p>
                     <p style="color:#9ca3af;font-size:0.9rem;" data-i18n="setup_hint">管理员正在配置系统，配置完成后即可正常使用。</p>
@@ -359,6 +359,10 @@
                                             <input type="number" id="cfg-llm-maxtokens" min="1" placeholder="2048">
                                         </div>
                                     </div>
+                                    <div class="admin-form-row" style="margin-top:0.5rem;">
+                                        <button type="button" class="btn-secondary btn-sm" id="btn-test-llm" onclick="window.testLLM()" data-i18n="admin_settings_test_llm">测试 LLM 连接</button>
+                                        <span id="test-llm-result" class="admin-form-hint hidden"></span>
+                                    </div>
                                 </fieldset>
 
                                 <fieldset class="admin-fieldset">
@@ -385,6 +389,10 @@
                                             <option value="true" data-i18n="admin_settings_emb_multimodal_yes">是（/embeddings/multimodal）</option>
                                         </select>
                                         <span class="admin-form-hint" data-i18n="admin_settings_emb_multimodal_hint">豆包视觉嵌入模型需开启此选项</span>
+                                    </div>
+                                    <div class="admin-form-row" style="margin-top:0.5rem;">
+                                        <button type="button" class="btn-secondary btn-sm" id="btn-test-embedding" onclick="window.testEmbedding()" data-i18n="admin_settings_test_embedding">测试 Embedding 连接</button>
+                                        <span id="test-embedding-result" class="admin-form-hint hidden"></span>
                                     </div>
                                 </fieldset>
 

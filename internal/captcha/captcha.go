@@ -1,4 +1,4 @@
-// Package captcha generates image-based CAPTCHAs with interference stripes.
+// Package captcha generates arithmetic-based image CAPTCHAs using vector fonts.
 package captcha
 
 import (
@@ -8,11 +8,17 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
-	"math"
 	mrand "math/rand"
+	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/math/fixed"
 )
 
 type entry struct {
@@ -21,9 +27,25 @@ type entry struct {
 }
 
 var (
-	store = make(map[string]entry)
-	mu    sync.Mutex
+	store    = make(map[string]entry)
+	mu       sync.Mutex
+	fontFace font.Face
 )
+
+func init() {
+	tt, err := opentype.Parse(gobold.TTF)
+	if err != nil {
+		panic("captcha: failed to parse font: " + err.Error())
+	}
+	fontFace, err = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    36,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		panic("captcha: failed to create font face: " + err.Error())
+	}
+}
 
 // Response holds the captcha ID and base64-encoded PNG image.
 type Response struct {
@@ -31,10 +53,7 @@ type Response struct {
 	Image string `json:"image"` // data:image/png;base64,...
 }
 
-// chars used in captcha text (no ambiguous chars like 0/O, 1/l/I)
-const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
-
-// Generate creates a new image captcha and returns its ID + base64 PNG.
+// Generate creates a new arithmetic captcha and returns its ID + base64 PNG.
 func Generate() *Response {
 	mu.Lock()
 	defer mu.Unlock()
@@ -47,12 +66,7 @@ func Generate() *Response {
 		}
 	}
 
-	// Generate random 4-char text
-	text := make([]byte, 4)
-	for i := range text {
-		text[i] = chars[mrand.Intn(len(chars))]
-	}
-	answer := string(text)
+	expr, answer := generateArithmetic()
 
 	id := generateCaptchaID()
 	store[id] = entry{
@@ -60,7 +74,7 @@ func Generate() *Response {
 		expiresAt: now.Add(5 * time.Minute),
 	}
 
-	img := renderCaptcha(answer, 240, 80)
+	img := renderCaptcha(expr + "= ?")
 
 	var buf bytes.Buffer
 	png.Encode(&buf, img)
@@ -72,7 +86,41 @@ func Generate() *Response {
 	}
 }
 
-// Validate checks the answer (case-insensitive) and consumes the captcha.
+// generateArithmetic produces a simple arithmetic expression and its integer answer.
+func generateArithmetic() (expr string, answer string) {
+	ops := []string{"+", "-", "*", "/"}
+	op := ops[mrand.Intn(len(ops))]
+
+	var a, b, result int
+	switch op {
+	case "+":
+		a = 10 + mrand.Intn(90)
+		b = 1 + mrand.Intn(9)
+		result = a + b
+	case "-":
+		a = 10 + mrand.Intn(90)
+		b = 1 + mrand.Intn(9)
+		if a < b {
+			a, b = b, a
+		}
+		result = a - b
+	case "*":
+		a = 10 + mrand.Intn(10)
+		b = 2 + mrand.Intn(8)
+		result = a * b
+	case "/":
+		b = 2 + mrand.Intn(8)
+		quotient := 2 + mrand.Intn(18)
+		a = b * quotient
+		result = quotient
+	}
+
+	expr = fmt.Sprintf("%d %s %d ", a, op, b)
+	answer = strconv.Itoa(result)
+	return
+}
+
+// Validate checks the answer and consumes the captcha.
 func Validate(id, answer string) bool {
 	mu.Lock()
 	defer mu.Unlock()
@@ -85,147 +133,61 @@ func Validate(id, answer string) bool {
 	if time.Now().After(e.expiresAt) {
 		return false
 	}
-	if len(answer) != len(e.answer) {
-		return false
-	}
-	for i := 0; i < len(answer); i++ {
-		a, b := answer[i], e.answer[i]
-		if a >= 'a' && a <= 'z' {
-			a -= 32
-		}
-		if b >= 'a' && b <= 'z' {
-			b -= 32
-		}
-		if a != b {
-			return false
-		}
-	}
-	return true
+	return answer == e.answer
 }
 
-// renderCaptcha draws the text with interference stripes onto an image.
-func renderCaptcha(text string, width, height int) *image.RGBA {
+// renderCaptcha draws the expression using Go Bold font onto an image.
+func renderCaptcha(text string) *image.RGBA {
+	// Measure text width to size the image
+	d := &font.Drawer{Face: fontFace}
+	textWidth := d.MeasureString(text).Ceil()
+
+	width := textWidth + 40 // 20px padding each side
+	if width < 200 {
+		width = 200
+	}
+	height := 60
+
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
-	// Background: light random color
-	bgR := uint8(230 + mrand.Intn(25))
-	bgG := uint8(230 + mrand.Intn(25))
-	bgB := uint8(230 + mrand.Intn(25))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			img.Set(x, y, color.RGBA{bgR, bgG, bgB, 255})
-		}
+	// Background: light color
+	bg := color.RGBA{
+		uint8(240 + mrand.Intn(15)),
+		uint8(240 + mrand.Intn(15)),
+		uint8(240 + mrand.Intn(15)),
+		255,
 	}
+	draw.Draw(img, img.Bounds(), &image.Uniform{bg}, image.Point{}, draw.Src)
 
-	// Draw interference lines
-	for i := 0; i < 6; i++ {
-		lineColor := color.RGBA{
-			uint8(mrand.Intn(200)),
-			uint8(mrand.Intn(200)),
-			uint8(mrand.Intn(200)),
-			255,
-		}
-		drawLine(img, mrand.Intn(width), mrand.Intn(height), mrand.Intn(width), mrand.Intn(height), lineColor, 2)
-	}
-
-	// Draw noise dots
-	for i := 0; i < 100; i++ {
+	// Sparse noise dots
+	for i := 0; i < 50; i++ {
 		img.Set(mrand.Intn(width), mrand.Intn(height), color.RGBA{
-			uint8(mrand.Intn(255)), uint8(mrand.Intn(255)), uint8(mrand.Intn(255)), 255,
+			uint8(180 + mrand.Intn(70)),
+			uint8(180 + mrand.Intn(70)),
+			uint8(180 + mrand.Intn(70)),
+			255,
 		})
 	}
 
-	// Draw each character with scale=3 (each glyph pixel becomes 3x3)
-	scale := 3
-	glyphW := 12 * scale // rendered char width
-	totalW := glyphW * len(text)
-	startX := (width - totalW) / 2
-
-	for i, ch := range text {
-		cx := startX + i*glyphW + glyphW/2
-		cy := height/2 + mrand.Intn(8) - 4
-		charColor := color.RGBA{
-			uint8(mrand.Intn(80)),
-			uint8(mrand.Intn(80)),
-			uint8(mrand.Intn(80)),
-			255,
-		}
-		drawCharHiRes(img, cx, cy, byte(ch), charColor, scale)
+	// Draw text centered
+	textColor := color.RGBA{
+		uint8(20 + mrand.Intn(40)),
+		uint8(20 + mrand.Intn(40)),
+		uint8(20 + mrand.Intn(40)),
+		255,
 	}
+	x := (width - textWidth) / 2
+	y := height/2 + 12 // baseline offset for 36pt font
 
-	// Draw more interference lines on top
-	for i := 0; i < 3; i++ {
-		lineColor := color.RGBA{
-			uint8(100 + mrand.Intn(155)),
-			uint8(100 + mrand.Intn(155)),
-			uint8(100 + mrand.Intn(155)),
-			180,
-		}
-		drawLine(img, 0, mrand.Intn(height), width, mrand.Intn(height), lineColor, 1)
+	drawer := &font.Drawer{
+		Dst:  img,
+		Src:  &image.Uniform{textColor},
+		Face: fontFace,
+		Dot:  fixed.P(x, y),
 	}
+	drawer.DrawString(text)
 
 	return img
-}
-
-// drawCharHiRes renders a character using a 12x16 hi-res bitmap font, scaled by the given factor.
-func drawCharHiRes(img *image.RGBA, cx, cy int, ch byte, c color.RGBA, scale int) {
-	glyph := getGlyphHiRes(ch)
-	if glyph == nil {
-		return
-	}
-	rows := len(glyph)
-	cols := 12
-	startX := cx - (cols*scale)/2
-	startY := cy - (rows*scale)/2
-	skew := float64(mrand.Intn(5)-2) * 0.08
-
-	for row := 0; row < rows; row++ {
-		bits := glyph[row]
-		for col := 0; col < cols; col++ {
-			if bits&(1<<uint(cols-1-col)) != 0 {
-				px := startX + col*scale + int(math.Round(float64(row)*skew))
-				py := startY + row*scale
-				for dy := 0; dy < scale; dy++ {
-					for dx := 0; dx < scale; dx++ {
-						img.Set(px+dx, py+dy, c)
-					}
-				}
-			}
-		}
-	}
-}
-
-// drawLine draws a line with given thickness.
-func drawLine(img *image.RGBA, x1, y1, x2, y2 int, c color.RGBA, thickness int) {
-	dx := x2 - x1
-	dy := y2 - y1
-	steps := abs(dx)
-	if abs(dy) > steps {
-		steps = abs(dy)
-	}
-	if steps == 0 {
-		return
-	}
-	xInc := float64(dx) / float64(steps)
-	yInc := float64(dy) / float64(steps)
-	x := float64(x1)
-	y := float64(y1)
-	half := thickness / 2
-	for i := 0; i <= steps; i++ {
-		for t := -half; t <= half; t++ {
-			img.Set(int(x), int(y)+t, c)
-			img.Set(int(x)+t, int(y), c)
-		}
-		x += xInc
-		y += yInc
-	}
-}
-
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
 
 // generateCaptchaID creates a cryptographically random captcha ID.
@@ -235,140 +197,4 @@ func generateCaptchaID() string {
 		return fmt.Sprintf("cap_%d", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("cap_%x", b)
-}
-
-// getGlyphHiRes returns a 12-wide x 16-tall bitmap for the given character.
-// Each uint16 represents one row; the top 12 bits are used.
-func getGlyphHiRes(ch byte) []uint16 {
-	glyphs := map[byte][]uint16{
-		'2': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x0080, 0x0100, 0x0200, 0x0400,
-			0x0800, 0x1000, 0x2000, 0x3F80, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'3': {
-			0x0000, 0x1F00, 0x3180, 0x0080, 0x0080, 0x0700, 0x0080, 0x0080,
-			0x0080, 0x0080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'4': {
-			0x0000, 0x0100, 0x0300, 0x0500, 0x0900, 0x1100, 0x2100, 0x3F80,
-			0x0100, 0x0100, 0x0100, 0x0100, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'5': {
-			0x0000, 0x3F80, 0x2000, 0x2000, 0x3F00, 0x0180, 0x0080, 0x0080,
-			0x0080, 0x0080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'6': {
-			0x0000, 0x0F00, 0x1800, 0x2000, 0x2000, 0x3F00, 0x3180, 0x2080,
-			0x2080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'7': {
-			0x0000, 0x3F80, 0x0080, 0x0100, 0x0100, 0x0200, 0x0200, 0x0400,
-			0x0400, 0x0800, 0x0800, 0x0800, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'8': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x3180, 0x1F00, 0x3180, 0x2080,
-			0x2080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'9': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x2080, 0x3180, 0x1F80, 0x0080,
-			0x0080, 0x0080, 0x0300, 0x1E00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'A': {
-			0x0000, 0x0400, 0x0A00, 0x0A00, 0x1100, 0x1100, 0x2080, 0x2080,
-			0x3F80, 0x2080, 0x2080, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'B': {
-			0x0000, 0x3F00, 0x2080, 0x2080, 0x2080, 0x3F00, 0x2080, 0x2080,
-			0x2080, 0x2080, 0x2080, 0x3F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'C': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x2000, 0x2000, 0x2000, 0x2000,
-			0x2000, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'D': {
-			0x0000, 0x3E00, 0x2100, 0x2080, 0x2080, 0x2080, 0x2080, 0x2080,
-			0x2080, 0x2080, 0x2100, 0x3E00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'E': {
-			0x0000, 0x3F80, 0x2000, 0x2000, 0x2000, 0x3F00, 0x2000, 0x2000,
-			0x2000, 0x2000, 0x2000, 0x3F80, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'F': {
-			0x0000, 0x3F80, 0x2000, 0x2000, 0x2000, 0x3F00, 0x2000, 0x2000,
-			0x2000, 0x2000, 0x2000, 0x2000, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'G': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x2000, 0x2000, 0x2380, 0x2080,
-			0x2080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'H': {
-			0x0000, 0x2080, 0x2080, 0x2080, 0x2080, 0x3F80, 0x2080, 0x2080,
-			0x2080, 0x2080, 0x2080, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'J': {
-			0x0000, 0x0380, 0x0080, 0x0080, 0x0080, 0x0080, 0x0080, 0x0080,
-			0x0080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'K': {
-			0x0000, 0x2080, 0x2100, 0x2200, 0x2400, 0x2800, 0x3000, 0x2800,
-			0x2400, 0x2200, 0x2100, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'L': {
-			0x0000, 0x2000, 0x2000, 0x2000, 0x2000, 0x2000, 0x2000, 0x2000,
-			0x2000, 0x2000, 0x2000, 0x3F80, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'M': {
-			0x0000, 0x2080, 0x3180, 0x3180, 0x2A80, 0x2A80, 0x2480, 0x2080,
-			0x2080, 0x2080, 0x2080, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'N': {
-			0x0000, 0x2080, 0x3080, 0x3080, 0x2880, 0x2880, 0x2480, 0x2480,
-			0x2280, 0x2280, 0x2180, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'P': {
-			0x0000, 0x3F00, 0x2080, 0x2080, 0x2080, 0x2080, 0x3F00, 0x2000,
-			0x2000, 0x2000, 0x2000, 0x2000, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'Q': {
-			0x0000, 0x1F00, 0x3180, 0x2080, 0x2080, 0x2080, 0x2080, 0x2080,
-			0x2480, 0x2280, 0x3100, 0x1E80, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'R': {
-			0x0000, 0x3F00, 0x2080, 0x2080, 0x2080, 0x2080, 0x3F00, 0x2200,
-			0x2100, 0x2100, 0x2080, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'S': {
-			0x0000, 0x1F00, 0x3180, 0x2000, 0x2000, 0x1800, 0x0700, 0x0080,
-			0x0080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'T': {
-			0x0000, 0x3F80, 0x0400, 0x0400, 0x0400, 0x0400, 0x0400, 0x0400,
-			0x0400, 0x0400, 0x0400, 0x0400, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'U': {
-			0x0000, 0x2080, 0x2080, 0x2080, 0x2080, 0x2080, 0x2080, 0x2080,
-			0x2080, 0x2080, 0x3180, 0x1F00, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'V': {
-			0x0000, 0x2080, 0x2080, 0x2080, 0x1100, 0x1100, 0x1100, 0x0A00,
-			0x0A00, 0x0A00, 0x0400, 0x0400, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'W': {
-			0x0000, 0x2080, 0x2080, 0x2080, 0x2080, 0x2480, 0x2480, 0x2A80,
-			0x2A80, 0x3180, 0x3180, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'X': {
-			0x0000, 0x2080, 0x2080, 0x1100, 0x0A00, 0x0400, 0x0400, 0x0A00,
-			0x1100, 0x2080, 0x2080, 0x2080, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'Y': {
-			0x0000, 0x2080, 0x2080, 0x1100, 0x0A00, 0x0400, 0x0400, 0x0400,
-			0x0400, 0x0400, 0x0400, 0x0400, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-		'Z': {
-			0x0000, 0x3F80, 0x0080, 0x0100, 0x0200, 0x0400, 0x0800, 0x1000,
-			0x2000, 0x2000, 0x2000, 0x3F80, 0x0000, 0x0000, 0x0000, 0x0000,
-		},
-	}
-	return glyphs[ch]
 }

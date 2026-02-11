@@ -1056,16 +1056,30 @@
 
         // Call API
         var token = getChatToken();
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function () { controller.abort(); }, 90000); // 90s timeout
+
         fetch('/api/query', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer ' + token
             },
-            body: JSON.stringify(reqBody)
+            body: JSON.stringify(reqBody),
+            signal: controller.signal
         })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('chat_request_failed')); });
+            if (!res.ok) {
+                return res.text().then(function (text) {
+                    try {
+                        var d = JSON.parse(text);
+                        throw new Error(d.error || i18n.t('chat_request_failed'));
+                    } catch (e) {
+                        if (e.message && e.message !== 'Unexpected token') throw e;
+                        throw new Error(i18n.t('chat_request_failed'));
+                    }
+                });
+            }
             return res.json();
         })
         .then(function (data) {
@@ -1083,17 +1097,22 @@
             chatMessages.push(msg);
         })
         .catch(function (err) {
+            var errMsg = err.name === 'AbortError'
+                ? i18n.t('chat_error_prefix') + i18n.t('chat_error_timeout') + i18n.t('chat_error_suffix')
+                : i18n.t('chat_error_prefix') + (err.message || i18n.t('chat_error_unknown')) + i18n.t('chat_error_suffix');
             chatMessages.push({
                 role: 'system',
-                content: i18n.t('chat_error_prefix') + (err.message || i18n.t('chat_error_unknown')) + i18n.t('chat_error_suffix'),
+                content: errMsg,
                 sources: [],
                 isPending: false,
                 timestamp: Date.now()
             });
         })
         .finally(function () {
+            clearTimeout(timeoutId);
             chatLoading = false;
             renderChatMessages();
+            updateSendBtnState();
             if (input) input.focus();
         });
     };
@@ -1827,6 +1846,78 @@
         })
         .catch(function (err) {
             if (resultEl) { resultEl.textContent = err.message; resultEl.className = 'error-text'; }
+        })
+        .finally(function () {
+            if (btn) btn.disabled = false;
+        });
+    };
+
+    window.testLLM = function () {
+        var btn = document.getElementById('btn-test-llm');
+        var result = document.getElementById('test-llm-result');
+        var endpoint = getVal('cfg-llm-endpoint');
+        var apiKey = getVal('cfg-llm-apikey');
+        var model = getVal('cfg-llm-model');
+        var temperature = parseFloat(getVal('cfg-llm-temperature')) || 0.3;
+        var maxTokens = parseInt(getVal('cfg-llm-maxtokens')) || 64;
+
+        if (!endpoint || !apiKey || !model) {
+            if (result) { result.textContent = i18n.t('admin_settings_test_missing_fields'); result.style.color = '#e53e3e'; result.classList.remove('hidden'); }
+            return;
+        }
+        if (btn) btn.disabled = true;
+        if (result) { result.textContent = i18n.t('admin_settings_test_testing'); result.style.color = '#6b7280'; result.classList.remove('hidden'); }
+
+        adminFetch('/api/test/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: endpoint, api_key: apiKey, model_name: model, temperature: temperature, max_tokens: maxTokens })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_settings_test_failed')); });
+            return res.json();
+        })
+        .then(function (data) {
+            if (result) { result.textContent = '✅ ' + i18n.t('admin_settings_test_success') + (data.reply ? ' — ' + data.reply : ''); result.style.color = '#38a169'; }
+        })
+        .catch(function (err) {
+            if (result) { result.textContent = '❌ ' + (err.message || i18n.t('admin_settings_test_failed')); result.style.color = '#e53e3e'; }
+        })
+        .finally(function () {
+            if (btn) btn.disabled = false;
+        });
+    };
+
+    window.testEmbedding = function () {
+        var btn = document.getElementById('btn-test-embedding');
+        var result = document.getElementById('test-embedding-result');
+        var endpoint = getVal('cfg-emb-endpoint');
+        var apiKey = getVal('cfg-emb-apikey');
+        var model = getVal('cfg-emb-model');
+        var multimodal = document.getElementById('cfg-emb-multimodal');
+        var useMultimodal = multimodal ? multimodal.value === 'true' : false;
+
+        if (!endpoint || !apiKey || !model) {
+            if (result) { result.textContent = i18n.t('admin_settings_test_missing_fields'); result.style.color = '#e53e3e'; result.classList.remove('hidden'); }
+            return;
+        }
+        if (btn) btn.disabled = true;
+        if (result) { result.textContent = i18n.t('admin_settings_test_testing'); result.style.color = '#6b7280'; result.classList.remove('hidden'); }
+
+        adminFetch('/api/test/embedding', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: endpoint, api_key: apiKey, model_name: model, use_multimodal: useMultimodal })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_settings_test_failed')); });
+            return res.json();
+        })
+        .then(function (data) {
+            if (result) { result.textContent = '✅ ' + i18n.t('admin_settings_test_success') + ' — ' + (data.dimensions || 0) + ' dims'; result.style.color = '#38a169'; }
+        })
+        .catch(function (err) {
+            if (result) { result.textContent = '❌ ' + (err.message || i18n.t('admin_settings_test_failed')); result.style.color = '#e53e3e'; }
         })
         .finally(function () {
             if (btn) btn.disabled = false;

@@ -26,17 +26,15 @@ const encryptedPrefix = "enc:"
 
 // Config holds all system configuration.
 type Config struct {
-	Server          ServerConfig    `json:"server"`
-	LLM             LLMConfig       `json:"llm"`
-	Embedding       EmbeddingConfig `json:"embedding"`
-	Vector          VectorConfig    `json:"vector"`
-	OAuth           OAuthConfig     `json:"oauth"`
-	Admin           AdminConfig     `json:"admin"`
-	SMTP            SMTPConfig      `json:"smtp"`
-	ProductIntro    string          `json:"product_intro"`
-	ProductName     string          `json:"product_name"`
-	LLMTested       bool            `json:"llm_tested"`
-	EmbeddingTested bool            `json:"embedding_tested"`
+	Server       ServerConfig    `json:"server"`
+	LLM          LLMConfig       `json:"llm"`
+	Embedding    EmbeddingConfig `json:"embedding"`
+	Vector       VectorConfig    `json:"vector"`
+	OAuth        OAuthConfig     `json:"oauth"`
+	Admin        AdminConfig     `json:"admin"`
+	SMTP         SMTPConfig      `json:"smtp"`
+	ProductIntro string          `json:"product_intro"`
+	ProductName  string          `json:"product_name"`
 }
 
 
@@ -291,8 +289,7 @@ func (cm *ConfigManager) Get() *Config {
 	return &c
 }
 
-// IsReady returns true if both LLM and Embedding API keys are configured (non-empty)
-// and have been tested successfully.
+// IsReady returns true if both LLM and Embedding API keys are configured (non-empty).
 func (cm *ConfigManager) IsReady() bool {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -300,9 +297,7 @@ func (cm *ConfigManager) IsReady() bool {
 		return false
 	}
 	return strings.TrimSpace(cm.config.LLM.APIKey) != "" &&
-		strings.TrimSpace(cm.config.Embedding.APIKey) != "" &&
-		cm.config.LLMTested &&
-		cm.config.EmbeddingTested
+		strings.TrimSpace(cm.config.Embedding.APIKey) != ""
 }
 
 // Update applies partial updates to the configuration and saves to disk.
@@ -335,26 +330,17 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 		if !ok {
 			return errors.New("expected string")
 		}
-		if cm.config.LLM.Endpoint != s {
-			cm.config.LLMTested = false
-		}
 		cm.config.LLM.Endpoint = s
 	case "llm.api_key":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
 		}
-		if cm.config.LLM.APIKey != s {
-			cm.config.LLMTested = false
-		}
 		cm.config.LLM.APIKey = s
 	case "llm.model_name":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
-		}
-		if cm.config.LLM.ModelName != s {
-			cm.config.LLMTested = false
 		}
 		cm.config.LLM.ModelName = s
 	case "llm.temperature":
@@ -376,26 +362,17 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 		if !ok {
 			return errors.New("expected string")
 		}
-		if cm.config.Embedding.Endpoint != s {
-			cm.config.EmbeddingTested = false
-		}
 		cm.config.Embedding.Endpoint = s
 	case "embedding.api_key":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
 		}
-		if cm.config.Embedding.APIKey != s {
-			cm.config.EmbeddingTested = false
-		}
 		cm.config.Embedding.APIKey = s
 	case "embedding.model_name":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
-		}
-		if cm.config.Embedding.ModelName != s {
-			cm.config.EmbeddingTested = false
 		}
 		cm.config.Embedding.ModelName = s
 	case "embedding.use_multimodal":
@@ -548,19 +525,6 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		cm.config.ProductName = s
-
-	case "llm_tested":
-		b, ok := val.(bool)
-		if !ok {
-			return errors.New("expected boolean")
-		}
-		cm.config.LLMTested = b
-	case "embedding_tested":
-		b, ok := val.(bool)
-		if !ok {
-			return errors.New("expected boolean")
-		}
-		cm.config.EmbeddingTested = b
 
 	// Server fields
 	case "server.port":
