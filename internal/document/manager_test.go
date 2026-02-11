@@ -38,7 +38,9 @@ func (m *mockEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	return result, nil
 }
 
-// setupTestDB creates a temporary SQLite database for testing.
+func (m *mockEmbeddingService) EmbedImageURL(imageURL string) ([]float64, error) {
+	return []float64{0.1, 0.2, 0.3}, nil
+}// setupTestDB creates a temporary SQLite database for testing.
 func setupTestDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
 	tmpFile, err := os.CreateTemp("", "test-doc-manager-*.db")

@@ -1172,3 +1172,30 @@ body {
         padding: 0.5rem 0.625rem;
     }
 }
+
+/* Captcha */
+.captcha-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.captcha-input {
+    flex: 1;
+}
+.captcha-question {
+    background: #f0f0f0;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #4F46E5;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    min-width: 120px;
+    text-align: center;
+}
+.captcha-question:hover {
+    background: #e5e7eb;
+}

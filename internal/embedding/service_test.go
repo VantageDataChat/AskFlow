@@ -42,7 +42,7 @@ func TestEmbed_RequestConstruction(t *testing.T) {
 	}, &captured)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "test-api-key", "test-model")
+	svc := NewAPIEmbeddingService(server.URL, "test-api-key", "test-model", false)
 	_, err := svc.Embed("hello world")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -72,7 +72,7 @@ func TestEmbed_ResponseParsing(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	result, err := svc.Embed("test text")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -93,7 +93,7 @@ func TestEmbed_EmptyResponse(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.Embed("test")
 	if err == nil {
 		t.Fatal("expected error for empty response, got nil")
@@ -106,7 +106,7 @@ func TestEmbed_APIError(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.Embed("test")
 	if err == nil {
 		t.Fatal("expected error for API error response, got nil")
@@ -119,7 +119,7 @@ func TestEmbed_ServerError(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.Embed("test")
 	if err == nil {
 		t.Fatal("expected error for 500 response, got nil")
@@ -133,7 +133,7 @@ func TestEmbed_NoAPIKey(t *testing.T) {
 	}, &captured)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "", "model")
+	svc := NewAPIEmbeddingService(server.URL, "", "model", false)
 	_, err := svc.Embed("test")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -153,7 +153,7 @@ func TestEmbedBatch_RequestConstruction(t *testing.T) {
 	}, &captured)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "batch-key", "batch-model")
+	svc := NewAPIEmbeddingService(server.URL, "batch-key", "batch-model", false)
 	_, err := svc.EmbedBatch([]string{"text1", "text2"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -183,7 +183,7 @@ func TestEmbedBatch_ResponseParsing(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	results, err := svc.EmbedBatch([]string{"a", "b", "c"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -208,7 +208,7 @@ func TestEmbedBatch_OutOfOrderIndices(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	results, err := svc.EmbedBatch([]string{"a", "b", "c"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -225,7 +225,7 @@ func TestEmbedBatch_OutOfOrderIndices(t *testing.T) {
 }
 
 func TestEmbedBatch_EmptyInput(t *testing.T) {
-	svc := NewAPIEmbeddingService("http://unused", "key", "model")
+	svc := NewAPIEmbeddingService("http://unused", "key", "model", false)
 	results, err := svc.EmbedBatch([]string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -243,7 +243,7 @@ func TestEmbedBatch_CountMismatch(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.EmbedBatch([]string{"a", "b"})
 	if err == nil {
 		t.Fatal("expected error for count mismatch, got nil")
@@ -259,7 +259,7 @@ func TestEmbedBatch_InvalidIndex(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.EmbedBatch([]string{"a", "b"})
 	if err == nil {
 		t.Fatal("expected error for invalid index, got nil")
@@ -272,7 +272,7 @@ func TestEmbedBatch_APIError(t *testing.T) {
 	}, nil)
 	defer server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "bad-key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "bad-key", "model", false)
 	_, err := svc.EmbedBatch([]string{"test"})
 	if err == nil {
 		t.Fatal("expected error for API error response, got nil")
@@ -284,7 +284,7 @@ func TestEmbed_ConnectionError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	server.Close()
 
-	svc := NewAPIEmbeddingService(server.URL, "key", "model")
+	svc := NewAPIEmbeddingService(server.URL, "key", "model", false)
 	_, err := svc.Embed("test")
 	if err == nil {
 		t.Fatal("expected error for connection failure, got nil")

@@ -31,6 +31,11 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	if err := migrateTables(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	return db, nil
 }
 
@@ -64,6 +69,7 @@ func createTables(db *sql.DB) error {
 			chunk_index   INTEGER NOT NULL,
 			chunk_text    TEXT NOT NULL,
 			embedding     BLOB NOT NULL,
+			image_url     TEXT DEFAULT '',
 			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (document_id) REFERENCES documents(id)
 		)`,
@@ -119,4 +125,50 @@ func createTables(db *sql.DB) error {
 	}
 
 	return tx.Commit()
+}
+
+// migrateTables adds missing columns to existing tables for backward compatibility.
+func migrateTables(db *sql.DB) error {
+	// Each migration: table, column, DDL to add it
+	migrations := []struct {
+		table  string
+		column string
+		ddl    string
+	}{
+		{"users", "password_hash", "ALTER TABLE users ADD COLUMN password_hash TEXT"},
+		{"users", "email_verified", "ALTER TABLE users ADD COLUMN email_verified INTEGER DEFAULT 0"},
+		{"chunks", "image_url", "ALTER TABLE chunks ADD COLUMN image_url TEXT DEFAULT ''"},
+	}
+
+	for _, m := range migrations {
+		if !columnExists(db, m.table, m.column) {
+			if _, err := db.Exec(m.ddl); err != nil {
+				return fmt.Errorf("migration failed (%s.%s): %w", m.table, m.column, err)
+			}
+		}
+	}
+	return nil
+}
+
+// columnExists checks if a column exists in a table.
+func columnExists(db *sql.DB, table, column string) bool {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dfltValue *string
+		var pk int
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }

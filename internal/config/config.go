@@ -26,12 +26,13 @@ const encryptedPrefix = "enc:"
 
 // Config holds all system configuration.
 type Config struct {
-	LLM       LLMConfig       `json:"llm"`
-	Embedding EmbeddingConfig `json:"embedding"`
-	Vector    VectorConfig    `json:"vector"`
-	OAuth     OAuthConfig     `json:"oauth"`
-	Admin     AdminConfig     `json:"admin"`
-	SMTP      SMTPConfig      `json:"smtp"`
+	LLM          LLMConfig       `json:"llm"`
+	Embedding    EmbeddingConfig `json:"embedding"`
+	Vector       VectorConfig    `json:"vector"`
+	OAuth        OAuthConfig     `json:"oauth"`
+	Admin        AdminConfig     `json:"admin"`
+	SMTP         SMTPConfig      `json:"smtp"`
+	ProductIntro string          `json:"product_intro"`
 }
 
 // LLMConfig holds LLM service configuration.
@@ -45,9 +46,10 @@ type LLMConfig struct {
 
 // EmbeddingConfig holds embedding service configuration.
 type EmbeddingConfig struct {
-	Endpoint  string `json:"endpoint"`
-	APIKey    string `json:"api_key"`
-	ModelName string `json:"model_name"`
+	Endpoint      string `json:"endpoint"`
+	APIKey        string `json:"api_key"`
+	ModelName     string `json:"model_name"`
+	UseMultimodal bool   `json:"use_multimodal"`
 }
 
 // VectorConfig holds vector store configuration.
@@ -137,16 +139,17 @@ func DefaultConfig() *Config {
 			MaxTokens:   2048,
 		},
 		Embedding: EmbeddingConfig{
-			Endpoint:  "https://ark.cn-beijing.volces.com/api/v3",
-			APIKey:    "102e16bc-4afd-45bd-9dff-65464072cc1d",
-			ModelName: "ep-20260211084516-9pmqt",
+			Endpoint:      "https://ark.cn-beijing.volces.com/api/v3",
+			APIKey:        "102e16bc-4afd-45bd-9dff-65464072cc1d",
+			ModelName:     "ep-20260211131413-rzhcx",
+			UseMultimodal: true,
 		},
 		Vector: VectorConfig{
 			DBPath:    "./data/helpdesk.db",
 			ChunkSize: 512,
 			Overlap:   128,
 			TopK:      5,
-			Threshold: 0.7,
+			Threshold: 0.5,
 		},
 		OAuth: OAuthConfig{
 			Providers: make(map[string]OAuthProviderConfig),
@@ -344,6 +347,12 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		cm.config.Embedding.ModelName = s
+	case "embedding.use_multimodal":
+		b, ok := val.(bool)
+		if !ok {
+			return errors.New("expected boolean")
+		}
+		cm.config.Embedding.UseMultimodal = b
 
 	// Vector fields
 	case "vector.db_path":
@@ -453,6 +462,13 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected boolean")
 		}
 		cm.config.SMTP.UseTLS = b
+
+	case "product_intro":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.ProductIntro = s
 
 	default:
 		// Handle OAuth provider config: oauth.providers.<name>.<field>

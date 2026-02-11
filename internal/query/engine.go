@@ -6,7 +6,9 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"helpdesk/internal/config"
@@ -34,6 +36,7 @@ type SourceRef struct {
 	DocumentName string `json:"document_name"`
 	ChunkIndex   int    `json:"chunk_index"`
 	Snippet      string `json:"snippet"`
+	ImageURL     string `json:"image_url,omitempty"`
 }
 
 // QueryEngine orchestrates the RAG query flow: embed → search → LLM generate or pending.
@@ -62,17 +65,107 @@ func NewQueryEngine(
 	}
 }
 
+// UpdateServices replaces the embedding and LLM services (used after config change).
+func (qe *QueryEngine) UpdateServices(es embedding.EmbeddingService, ls llm.LLMService, cfg *config.Config) {
+	qe.embeddingService = es
+	qe.llmService = ls
+	qe.config = cfg
+}
+
+// IntentResult represents the result of intent classification.
+type IntentResult struct {
+	Intent string // "greeting", "product", or "irrelevant"
+	Reason string
+}
+
+// classifyIntent uses the LLM to determine the user's intent.
+func (qe *QueryEngine) classifyIntent(question string) (*IntentResult, error) {
+	productIntro := ""
+	if qe.config != nil {
+		productIntro = qe.config.ProductIntro
+	}
+
+	systemPrompt := "你是一个意图分类器。根据用户输入判断意图类别。"
+	if productIntro != "" {
+		systemPrompt += "\n\n产品介绍：" + productIntro
+	}
+	systemPrompt += "\n\n请只回复一个JSON对象，格式：{\"intent\":\"类别\"}" +
+		"\n\n意图类别：" +
+		"\n- greeting: 仅限纯粹的打招呼和问候语（如：你好、hi、hello、在吗）" +
+		"\n- product: 任何与产品相关的问题，包括但不限于：功能介绍、下载、安装、使用方法、技术问题、故障排查、价格、版本等" +
+		"\n- irrelevant: 与产品完全无关的问题（如天气、笑话、新闻、个人情感等）" +
+		"\n\n重要规则：如果用户在询问任何具体信息（即使很简短），都应归类为product而非greeting。" +
+		"\n\n示例：" +
+		"\n\"你好\" → {\"intent\":\"greeting\"}" +
+		"\n\"hi\" → {\"intent\":\"greeting\"}" +
+		"\n\"这是什么产品\" → {\"intent\":\"product\"}" +
+		"\n\"下载地址\" → {\"intent\":\"product\"}" +
+		"\n\"怎么安装\" → {\"intent\":\"product\"}" +
+		"\n\"今天天气怎么样\" → {\"intent\":\"irrelevant\",\"reason\":\"天气查询与产品无关\"}"
+
+	answer, err := qe.llmService.Generate(systemPrompt, nil, question)
+	if err != nil {
+		// If classification fails, default to allowing the query
+		return &IntentResult{Intent: "product"}, nil
+	}
+
+	// Parse JSON response — extract first JSON object
+	start := -1
+	end := -1
+	for i, c := range answer {
+		if c == '{' && start == -1 {
+			start = i
+		}
+		if c == '}' {
+			end = i + 1
+		}
+	}
+	if start >= 0 && end > start {
+		var parsed struct {
+			Intent string `json:"intent"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(answer[start:end]), &parsed); err == nil {
+			return &IntentResult{Intent: parsed.Intent, Reason: parsed.Reason}, nil
+		}
+	}
+
+	// Default to product if parsing fails
+	return &IntentResult{Intent: "product"}, nil
+}
+
 // Query executes the full RAG pipeline:
 // 1. Embed the question
 // 2. Search the vector store for relevant chunks
 // 3. If results found, call LLM to generate an answer with source references
 // 4. If no results, create a pending question and notify the user
 func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
+	// Step 0: Intent classification
+	intent, err := qe.classifyIntent(req.Question)
+	if err == nil {
+		switch intent.Intent {
+		case "greeting":
+			// Return product intro as greeting response
+			intro := "您好！欢迎使用我们的产品。"
+			if qe.config != nil && qe.config.ProductIntro != "" {
+				intro = qe.config.ProductIntro
+			}
+			return &QueryResponse{Answer: intro}, nil
+		case "irrelevant":
+			msg := "抱歉，这个问题与我们的产品无关。请问有什么产品方面的问题需要帮助吗？"
+			if intent.Reason != "" {
+				msg = "抱歉，" + intent.Reason + "。请问有什么产品方面的问题需要帮助吗？"
+			}
+			return &QueryResponse{Answer: msg}, nil
+		}
+	}
+
 	// Step 1: Embed the question
 	queryVector, err := qe.embeddingService.Embed(req.Question)
 	if err != nil {
 		return nil, fmt.Errorf("failed to embed question: %w", err)
 	}
+	log.Printf("[Query] question=%q, vector_dim=%d", req.Question, len(queryVector))
 
 	// Step 2: Search vector store
 	topK := qe.config.Vector.TopK
@@ -81,8 +174,21 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to search vector store: %w", err)
 	}
+	log.Printf("[Query] search topK=%d threshold=%.2f results=%d", topK, threshold, len(results))
 
-	// Step 3: If no results above threshold, create pending question
+	// Step 3: If no results above threshold, try with lower threshold before giving up
+	if len(results) == 0 {
+		relaxedResults, _ := qe.vectorStore.Search(queryVector, 3, 0.0)
+		log.Printf("[Query] relaxed search results=%d", len(relaxedResults))
+		for i, r := range relaxedResults {
+			log.Printf("[Query]   relaxed[%d] score=%.4f doc=%q dim_match=%v", i, r.Score, r.DocumentName, true)
+		}
+		if len(relaxedResults) > 0 && relaxedResults[0].Score >= 0.3 {
+			results = relaxedResults[:1]
+		}
+	}
+
+	// Step 4: If still no results, create pending question
 	if len(results) == 0 {
 		if err := qe.createPendingQuestion(req.Question, req.UserID); err != nil {
 			return nil, fmt.Errorf("failed to create pending question: %w", err)
@@ -93,7 +199,7 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 		}, nil
 	}
 
-	// Step 4: Build context from search results and call LLM
+	// Step 5: Build context from search results and call LLM
 	context := make([]string, len(results))
 	for i, r := range results {
 		context[i] = r.ChunkText
@@ -104,7 +210,7 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 		return nil, fmt.Errorf("failed to generate answer: %w", err)
 	}
 
-	// Step 5: Build source references
+	// Step 6: Build source references
 	sources := make([]SourceRef, len(results))
 	for i, r := range results {
 		snippet := r.ChunkText
@@ -115,6 +221,7 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 			DocumentName: r.DocumentName,
 			ChunkIndex:   r.ChunkIndex,
 			Snippet:      snippet,
+			ImageURL:     r.ImageURL,
 		}
 	}
 

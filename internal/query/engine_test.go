@@ -34,6 +34,10 @@ func (m *mockEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	return results, nil
 }
 
+func (m *mockEmbeddingService) EmbedImageURL(imageURL string) ([]float64, error) {
+	return []float64{0.1, 0.2, 0.3}, nil
+}
+
 type mockVectorStore struct {
 	searchFn func(queryVector []float64, topK int, threshold float64) ([]vectorstore.SearchResult, error)
 }
@@ -152,9 +156,15 @@ func TestQuery_PendingWhenNoResults(t *testing.T) {
 			return []vectorstore.SearchResult{}, nil
 		},
 	}
+	intentCalled := false
 	ls := &mockLLMService{
 		generateFn: func(prompt string, context []string, question string) (string, error) {
-			t.Error("LLM should not be called when no results found")
+			if !intentCalled {
+				// First call is intent classification — allow it
+				intentCalled = true
+				return `{"intent":"product"}`, nil
+			}
+			t.Error("LLM should not be called for answer generation when no results found")
 			return "", nil
 		},
 	}
@@ -346,6 +356,7 @@ func TestQuery_UsesConfigTopKAndThreshold(t *testing.T) {
 
 	var capturedTopK int
 	var capturedThreshold float64
+	firstCall := true
 
 	es := &mockEmbeddingService{
 		embedFn: func(text string) ([]float64, error) {
@@ -354,14 +365,17 @@ func TestQuery_UsesConfigTopKAndThreshold(t *testing.T) {
 	}
 	vs := &mockVectorStore{
 		searchFn: func(queryVector []float64, topK int, threshold float64) ([]vectorstore.SearchResult, error) {
-			capturedTopK = topK
-			capturedThreshold = threshold
+			if firstCall {
+				capturedTopK = topK
+				capturedThreshold = threshold
+				firstCall = false
+			}
 			return []vectorstore.SearchResult{}, nil
 		},
 	}
 	ls := &mockLLMService{
 		generateFn: func(prompt string, context []string, question string) (string, error) {
-			return "", nil
+			return `{"intent":"product"}`, nil
 		},
 	}
 

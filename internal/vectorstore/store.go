@@ -28,6 +28,7 @@ type VectorChunk struct {
 	DocumentID   string    `json:"document_id"`
 	DocumentName string    `json:"document_name"`
 	Vector       []float64 `json:"vector"`
+	ImageURL     string    `json:"image_url,omitempty"`
 }
 
 // SearchResult represents a search result with similarity score.
@@ -37,6 +38,7 @@ type SearchResult struct {
 	DocumentID   string  `json:"document_id"`
 	DocumentName string  `json:"document_name"`
 	Score        float64 `json:"score"`
+	ImageURL     string  `json:"image_url,omitempty"`
 }
 
 // cachedChunk holds a chunk's metadata and pre-computed norm for fast similarity.
@@ -46,7 +48,8 @@ type cachedChunk struct {
 	documentID   string
 	documentName string
 	vector       []float64
-	norm         float64 // pre-computed L2 norm
+	norm         float64
+	imageURL     string
 }
 
 // SQLiteVectorStore implements VectorStore using SQLite for persistence
@@ -66,7 +69,7 @@ func NewSQLiteVectorStore(db *sql.DB) *SQLiteVectorStore {
 // loadCache reads all chunks from the database into memory.
 // Must be called with mu held for writing.
 func (s *SQLiteVectorStore) loadCache() error {
-	rows, err := s.db.Query(`SELECT document_id, document_name, chunk_index, chunk_text, embedding FROM chunks`)
+	rows, err := s.db.Query(`SELECT document_id, document_name, chunk_index, chunk_text, embedding, COALESCE(image_url,'') FROM chunks`)
 	if err != nil {
 		return fmt.Errorf("failed to query chunks: %w", err)
 	}
@@ -74,11 +77,11 @@ func (s *SQLiteVectorStore) loadCache() error {
 
 	var cache []cachedChunk
 	for rows.Next() {
-		var docID, docName, chunkText string
+		var docID, docName, chunkText, imageURL string
 		var chunkIndex int
 		var embeddingBytes []byte
 
-		if err := rows.Scan(&docID, &docName, &chunkIndex, &chunkText, &embeddingBytes); err != nil {
+		if err := rows.Scan(&docID, &docName, &chunkIndex, &chunkText, &embeddingBytes, &imageURL); err != nil {
 			return fmt.Errorf("failed to scan row: %w", err)
 		}
 
@@ -90,6 +93,7 @@ func (s *SQLiteVectorStore) loadCache() error {
 			documentName: docName,
 			vector:       vec,
 			norm:         vectorNorm(vec),
+			imageURL:     imageURL,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -128,8 +132,8 @@ func (s *SQLiteVectorStore) Store(docID string, chunks []VectorChunk) error {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	stmt, err := tx.Prepare(`INSERT INTO chunks (id, document_id, document_name, chunk_index, chunk_text, embedding)
-		VALUES (?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO chunks (id, document_id, document_name, chunk_index, chunk_text, embedding, image_url)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to prepare statement: %w", err)
@@ -141,7 +145,7 @@ func (s *SQLiteVectorStore) Store(docID string, chunks []VectorChunk) error {
 		chunkID := fmt.Sprintf("%s-%d", docID, chunk.ChunkIndex)
 		embeddingBytes := SerializeVector(chunk.Vector)
 
-		_, err := stmt.Exec(chunkID, docID, chunk.DocumentName, chunk.ChunkIndex, chunk.ChunkText, embeddingBytes)
+		_, err := stmt.Exec(chunkID, docID, chunk.DocumentName, chunk.ChunkIndex, chunk.ChunkText, embeddingBytes, chunk.ImageURL)
 		if err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to insert chunk %s: %w", chunkID, err)
@@ -154,6 +158,7 @@ func (s *SQLiteVectorStore) Store(docID string, chunks []VectorChunk) error {
 			documentName: chunk.DocumentName,
 			vector:       chunk.Vector,
 			norm:         vectorNorm(chunk.Vector),
+			imageURL:     chunk.ImageURL,
 		})
 	}
 
@@ -223,7 +228,7 @@ func (s *SQLiteVectorStore) Search(queryVector []float64, topK int, threshold fl
 			var local []SearchResult
 			for i := range items {
 				c := &items[i]
-				if c.norm == 0 {
+				if c.norm == 0 || len(c.vector) != len(queryVector) {
 					continue
 				}
 				// Inline dot product for speed
@@ -239,6 +244,7 @@ func (s *SQLiteVectorStore) Search(queryVector []float64, topK int, threshold fl
 						DocumentID:   c.documentID,
 						DocumentName: c.documentName,
 						Score:        score,
+						ImageURL:     c.imageURL,
 					})
 				}
 			}

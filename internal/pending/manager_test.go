@@ -36,6 +36,10 @@ func (m *mockEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	return result, nil
 }
 
+func (m *mockEmbeddingService) EmbedImageURL(imageURL string) ([]float64, error) {
+	return []float64{0.1, 0.2, 0.3}, nil
+}
+
 // mockLLMService implements llm.LLMService for testing.
 type mockLLMService struct {
 	generateFunc func(prompt string, context []string, question string) (string, error)

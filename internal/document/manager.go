@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,10 +22,11 @@ import (
 
 // supportedFileTypes lists the file types accepted for upload.
 var supportedFileTypes = map[string]bool{
-	"pdf":   true,
-	"word":  true,
-	"excel": true,
-	"ppt":   true,
+	"pdf":      true,
+	"word":     true,
+	"excel":    true,
+	"ppt":      true,
+	"markdown": true,
 }
 
 // DocumentManager orchestrates document upload, processing, and lifecycle management.
@@ -78,6 +81,11 @@ func NewDocumentManager(
 	}
 }
 
+// UpdateEmbeddingService replaces the embedding service (used after config change).
+func (dm *DocumentManager) UpdateEmbeddingService(es embedding.EmbeddingService) {
+	dm.embeddingService = es
+}
+
 // generateID creates a random UUID-like hex string.
 func generateID() (string, error) {
 	b := make([]byte, 16)
@@ -111,6 +119,12 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 
 	if err := dm.insertDocument(doc); err != nil {
 		return nil, fmt.Errorf("failed to insert document record: %w", err)
+	}
+
+	// Save original file to disk
+	if err := dm.saveOriginalFile(docID, req.FileName, req.FileData); err != nil {
+		// Non-fatal: log but continue processing
+		fmt.Printf("Warning: failed to save original file: %v\n", err)
 	}
 
 	// Parse → Chunk → Embed → Store
@@ -163,8 +177,8 @@ func (dm *DocumentManager) UploadURL(req UploadURLRequest) (*DocumentInfo, error
 	return doc, nil
 }
 
-// DeleteDocument removes a document's vectors from the vector store and its
-// record from the documents table.
+// DeleteDocument removes a document's vectors from the vector store, its
+// record from the documents table, and the original file from disk.
 func (dm *DocumentManager) DeleteDocument(docID string) error {
 	if err := dm.vectorStore.DeleteByDocID(docID); err != nil {
 		return fmt.Errorf("failed to delete vectors: %w", err)
@@ -173,6 +187,9 @@ func (dm *DocumentManager) DeleteDocument(docID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete document record: %w", err)
 	}
+	// Remove original file directory
+	dir := filepath.Join(".", "data", "uploads", docID)
+	os.RemoveAll(dir)
 	return nil
 }
 
@@ -212,10 +229,42 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 	if err != nil {
 		return fmt.Errorf("parse error: %w", err)
 	}
-	if result.Text == "" {
+	if result.Text == "" && len(result.Images) == 0 {
 		return fmt.Errorf("文档内容为空")
 	}
-	return dm.chunkEmbedStore(docID, docName, result.Text)
+
+	// Store text chunks
+	if result.Text != "" {
+		if err := dm.chunkEmbedStore(docID, docName, result.Text); err != nil {
+			return err
+		}
+	}
+
+	// Store image embeddings
+	for i, img := range result.Images {
+		if img.URL == "" {
+			continue
+		}
+		vec, err := dm.embeddingService.EmbedImageURL(img.URL)
+		if err != nil {
+			// Non-fatal: skip images that fail to embed
+			fmt.Printf("Warning: failed to embed image %d (%s): %v\n", i, img.Alt, err)
+			continue
+		}
+		imgChunk := []vectorstore.VectorChunk{{
+			ChunkText:    fmt.Sprintf("[图片: %s]", img.Alt),
+			ChunkIndex:   1000 + i, // offset to avoid collision with text chunks
+			DocumentID:   docID,
+			DocumentName: docName,
+			Vector:       vec,
+			ImageURL:     img.URL,
+		}}
+		if err := dm.vectorStore.Store(docID, imgChunk); err != nil {
+			fmt.Printf("Warning: failed to store image vector %d: %v\n", i, err)
+		}
+	}
+
+	return nil
 }
 
 // processURL fetches URL content and processes it as plain text.
@@ -290,4 +339,33 @@ func (dm *DocumentManager) insertDocument(doc *DocumentInfo) error {
 // updateDocumentStatus updates the status and error fields of a document.
 func (dm *DocumentManager) updateDocumentStatus(docID, status, errMsg string) {
 	dm.db.Exec(`UPDATE documents SET status = ?, error = ? WHERE id = ?`, status, errMsg, docID)
+}
+
+// saveOriginalFile saves the uploaded file to data/uploads/{docID}/{filename}.
+func (dm *DocumentManager) saveOriginalFile(docID, filename string, data []byte) error {
+	dir := filepath.Join(".", "data", "uploads", docID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create upload dir: %w", err)
+	}
+	filePath := filepath.Join(dir, filename)
+	return os.WriteFile(filePath, data, 0644)
+}
+
+// GetFilePath returns the path to the original uploaded file for a document.
+// Returns empty string if the file doesn't exist.
+func (dm *DocumentManager) GetFilePath(docID string) (string, string, error) {
+	var name string
+	err := dm.db.QueryRow(`SELECT name FROM documents WHERE id = ?`, docID).Scan(&name)
+	if err != nil {
+		return "", "", fmt.Errorf("document not found: %w", err)
+	}
+
+	dir := filepath.Join(".", "data", "uploads", docID)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return "", name, fmt.Errorf("original file not found")
+	}
+
+	filePath := filepath.Join(dir, entries[0].Name())
+	return filePath, entries[0].Name(), nil
 }

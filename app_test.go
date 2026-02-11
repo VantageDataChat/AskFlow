@@ -31,6 +31,9 @@ func (m *mockEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	}
 	return result, nil
 }
+func (m *mockEmbeddingService) EmbedImageURL(imageURL string) ([]float64, error) {
+	return []float64{0.1, 0.2, 0.3}, nil
+}
 
 type mockLLMService struct{}
 
@@ -51,7 +54,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	}
 	for _, stmt := range []string{
 		`CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, name TEXT, type TEXT, status TEXT, error TEXT, created_at DATETIME)`,
-		`CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, document_id TEXT, document_name TEXT, chunk_index INTEGER, chunk_text TEXT, embedding BLOB, created_at DATETIME)`,
+		`CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, document_id TEXT, document_name TEXT, chunk_index INTEGER, chunk_text TEXT, embedding BLOB, image_url TEXT DEFAULT '', created_at DATETIME)`,
 		`CREATE TABLE IF NOT EXISTS pending_questions (id TEXT PRIMARY KEY, question TEXT, user_id TEXT, status TEXT, answer TEXT, llm_answer TEXT, created_at DATETIME, answered_at DATETIME)`,
 		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT, name TEXT, provider TEXT NOT NULL, provider_id TEXT NOT NULL, password_hash TEXT, email_verified INTEGER DEFAULT 0, created_at DATETIME, last_login DATETIME)`,
 		`CREATE TABLE IF NOT EXISTS email_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, token TEXT NOT NULL UNIQUE, type TEXT NOT NULL, expires_at DATETIME NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (user_id) REFERENCES users(id))`,

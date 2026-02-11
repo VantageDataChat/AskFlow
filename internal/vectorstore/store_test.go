@@ -28,6 +28,7 @@ func setupTestDB(t *testing.T) (*sql.DB, func()) {
 		chunk_index   INTEGER NOT NULL,
 		chunk_text    TEXT NOT NULL,
 		embedding     BLOB NOT NULL,
+		image_url     TEXT DEFAULT '',
 		created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
 	if err != nil {
@@ -284,7 +285,7 @@ func TestStorePersistence(t *testing.T) {
 	db1.Exec(`CREATE TABLE IF NOT EXISTS chunks (
 		id TEXT PRIMARY KEY, document_id TEXT NOT NULL, document_name TEXT NOT NULL,
 		chunk_index INTEGER NOT NULL, chunk_text TEXT NOT NULL, embedding BLOB NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
+		image_url TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`)
 
 	store1 := NewSQLiteVectorStore(db1)
 	store1.Store("doc1", []VectorChunk{

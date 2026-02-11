@@ -11,58 +11,88 @@ import (
 	"time"
 )
 
-// EmbeddingService defines the interface for text embedding operations.
+// EmbeddingService defines the interface for text and image embedding operations.
 type EmbeddingService interface {
 	Embed(text string) ([]float64, error)
 	EmbedBatch(texts []string) ([][]float64, error)
+	EmbedImageURL(imageURL string) ([]float64, error)
 }
 
 // APIEmbeddingService implements EmbeddingService using an OpenAI-compatible API.
 type APIEmbeddingService struct {
-	Endpoint  string
-	APIKey    string
-	ModelName string
-	client    *http.Client
+	Endpoint      string
+	APIKey        string
+	ModelName     string
+	UseMultimodal bool
+	client        *http.Client
 }
 
 // NewAPIEmbeddingService creates a new APIEmbeddingService with the given configuration.
-func NewAPIEmbeddingService(endpoint, apiKey, modelName string) *APIEmbeddingService {
+func NewAPIEmbeddingService(endpoint, apiKey, modelName string, useMultimodal bool) *APIEmbeddingService {
 	return &APIEmbeddingService{
-		Endpoint:  endpoint,
-		APIKey:    apiKey,
-		ModelName: modelName,
+		Endpoint:      endpoint,
+		APIKey:        apiKey,
+		ModelName:     modelName,
+		UseMultimodal: useMultimodal,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
-// embeddingRequest is the request body for the OpenAI-compatible embedding API.
+// --- Standard (OpenAI-compatible) types ---
+
 type embeddingRequest struct {
 	Model string      `json:"model"`
 	Input interface{} `json:"input"`
 }
 
-// embeddingResponse is the response body from the OpenAI-compatible embedding API.
 type embeddingResponse struct {
 	Data  []embeddingData `json:"data"`
 	Error *apiError       `json:"error,omitempty"`
 }
 
-// embeddingData represents a single embedding result.
 type embeddingData struct {
 	Embedding []float64 `json:"embedding"`
 	Index     int       `json:"index"`
 }
 
-// apiError represents an error returned by the API.
 type apiError struct {
 	Message string `json:"message"`
 	Type    string `json:"type"`
 }
 
+// --- Multimodal types ---
+
+type multimodalInputItem struct {
+	Type     string                `json:"type"`
+	Text     string                `json:"text,omitempty"`
+	ImageURL *multimodalImageURL   `json:"image_url,omitempty"`
+}
+
+type multimodalImageURL struct {
+	URL string `json:"url"`
+}
+
+type multimodalRequest struct {
+	Model string                `json:"model"`
+	Input []multimodalInputItem `json:"input"`
+}
+
+type multimodalResponse struct {
+	Data  multimodalData `json:"data"`
+	Error *apiError      `json:"error,omitempty"`
+}
+
+type multimodalData struct {
+	Embedding []float64 `json:"embedding"`
+}
+
 // Embed converts a single text string into an embedding vector.
 func (s *APIEmbeddingService) Embed(text string) ([]float64, error) {
+	if s.UseMultimodal {
+		return s.embedMultimodal(text)
+	}
 	results, err := s.callAPI(text)
 	if err != nil {
 		return nil, err
@@ -78,6 +108,9 @@ func (s *APIEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
+	if s.UseMultimodal {
+		return s.embedBatchMultimodal(texts)
+	}
 	results, err := s.callAPI(texts)
 	if err != nil {
 		return nil, err
@@ -85,8 +118,6 @@ func (s *APIEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	if len(results) != len(texts) {
 		return nil, fmt.Errorf("embedding API returned %d results, expected %d", len(results), len(texts))
 	}
-
-	// Sort results by index to ensure correct ordering.
 	embeddings := make([][]float64, len(texts))
 	for _, d := range results {
 		if d.Index < 0 || d.Index >= len(texts) {
@@ -97,7 +128,8 @@ func (s *APIEmbeddingService) EmbedBatch(texts []string) ([][]float64, error) {
 	return embeddings, nil
 }
 
-// callAPI sends the embedding request to the API and returns the parsed response data.
+// --- Standard API call ---
+
 func (s *APIEmbeddingService) callAPI(input interface{}) ([]embeddingData, error) {
 	reqBody := embeddingRequest{
 		Model: s.ModelName,
@@ -146,4 +178,95 @@ func (s *APIEmbeddingService) callAPI(input interface{}) ([]embeddingData, error
 	}
 
 	return result.Data, nil
+}
+
+// --- Multimodal API calls ---
+
+func (s *APIEmbeddingService) embedMultimodal(text string) ([]float64, error) {
+	input := []multimodalInputItem{{Type: "text", Text: text}}
+	vec, err := s.callMultimodalAPI(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(vec) == 0 {
+		return nil, fmt.Errorf("multimodal embedding API returned empty vector")
+	}
+	return vec, nil
+}
+
+func (s *APIEmbeddingService) embedBatchMultimodal(texts []string) ([][]float64, error) {
+	embeddings := make([][]float64, len(texts))
+	for i, text := range texts {
+		vec, err := s.embedMultimodal(text)
+		if err != nil {
+			return nil, fmt.Errorf("embed text[%d]: %w", i, err)
+		}
+		embeddings[i] = vec
+	}
+	return embeddings, nil
+}
+
+// EmbedImageURL embeds an image via its URL using the multimodal API.
+func (s *APIEmbeddingService) EmbedImageURL(imageURL string) ([]float64, error) {
+	if !s.UseMultimodal {
+		return nil, fmt.Errorf("image embedding requires multimodal mode")
+	}
+	input := []multimodalInputItem{{
+		Type:     "image_url",
+		ImageURL: &multimodalImageURL{URL: imageURL},
+	}}
+	vec, err := s.callMultimodalAPI(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(vec) == 0 {
+		return nil, fmt.Errorf("multimodal embedding API returned empty vector for image")
+	}
+	return vec, nil
+}
+
+func (s *APIEmbeddingService) callMultimodalAPI(input []multimodalInputItem) ([]float64, error) {
+	reqBody := multimodalRequest{
+		Model: s.ModelName,
+		Input: input,
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	url := s.Endpoint + "/embeddings/multimodal"
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+s.APIKey)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("multimodal embedding API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("embedding API error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var result multimodalResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("multimodal embedding API error: %s", result.Error.Message)
+	}
+
+	return result.Data.Embedding, nil
 }

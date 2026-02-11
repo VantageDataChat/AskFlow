@@ -21,6 +21,14 @@ type DocumentParser struct{}
 type ParseResult struct {
 	Text     string            `json:"text"`
 	Metadata map[string]string `json:"metadata"`
+	Images   []ImageRef        `json:"images,omitempty"`
+}
+
+// ImageRef represents an image extracted from a document.
+type ImageRef struct {
+	Alt  string `json:"alt"`
+	URL  string `json:"url"`  // external URL or relative path
+	Data []byte `json:"-"`    // raw image data (for embedded images)
 }
 
 // Parse dispatches to the correct parser based on fileType.
@@ -35,6 +43,8 @@ func (dp *DocumentParser) Parse(fileData []byte, fileType string) (*ParseResult,
 		return dp.parseExcel(fileData)
 	case "ppt":
 		return dp.parsePPT(fileData)
+	case "markdown":
+		return dp.parseMarkdown(fileData)
 	default:
 		return nil, fmt.Errorf("不支持的文件格式: %s", fileType)
 	}
@@ -214,4 +224,48 @@ func CleanText(text string) string {
 	text = nlRe.ReplaceAllString(text, "\n\n")
 
 	return strings.TrimSpace(text)
+}
+
+// parseMarkdown extracts plain text from Markdown content.
+// Strips common Markdown syntax while preserving the text structure.
+func (dp *DocumentParser) parseMarkdown(data []byte) (*ParseResult, error) {
+	text := string(data)
+	if strings.TrimSpace(text) == "" {
+		return nil, fmt.Errorf("Markdown文件内容为空")
+	}
+
+	// Extract image references before stripping markdown
+	reImg := regexp.MustCompile(`!\[([^\]]*)\]\(([^)]+)\)`)
+	imgMatches := reImg.FindAllStringSubmatch(text, -1)
+	var images []ImageRef
+	for _, m := range imgMatches {
+		if len(m) >= 3 {
+			images = append(images, ImageRef{Alt: m[1], URL: m[2]})
+		}
+	}
+
+	// Strip common markdown syntax for cleaner text
+	re := regexp.MustCompile(`(?m)^#{1,6}\s+`)
+	text = re.ReplaceAllString(text, "")
+
+	text = strings.ReplaceAll(text, "**", "")
+	text = strings.ReplaceAll(text, "__", "")
+	text = strings.ReplaceAll(text, "*", "")
+	text = strings.ReplaceAll(text, "_", "")
+	text = strings.ReplaceAll(text, "`", "")
+
+	reLink := regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	text = reLink.ReplaceAllString(text, "$1")
+
+	// Replace image syntax with alt text + image marker
+	text = reImg.ReplaceAllString(text, "$1")
+
+	reBlank := regexp.MustCompile(`\n{3,}`)
+	text = reBlank.ReplaceAllString(text, "\n\n")
+
+	return &ParseResult{
+		Text:     strings.TrimSpace(text),
+		Metadata: map[string]string{"format": "markdown"},
+		Images:   images,
+	}, nil
 }

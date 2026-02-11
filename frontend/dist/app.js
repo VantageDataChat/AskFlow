@@ -8,6 +8,8 @@
     var SESSION_KEY = 'helpdesk_session';
     var USER_KEY = 'helpdesk_user';
     var adminLoginRoute = '/admin'; // default, will be fetched from server
+    var loginCaptchaId = '';
+    var registerCaptchaId = '';
 
     // --- Routing ---
 
@@ -60,6 +62,7 @@
                 navigate('/chat');
             } else {
                 showPage('login');
+                loadLoginCaptcha();
             }
         } else if (route === '/register') {
             if (session) {
@@ -74,6 +77,7 @@
         } else if (route === '/chat' || route === '/') {
             if (!session) {
                 showPage('login');
+                loadLoginCaptcha();
             } else {
                 showPage('chat');
                 initChat();
@@ -81,6 +85,7 @@
         } else {
             if (!session) {
                 showPage('login');
+                loadLoginCaptcha();
             } else {
                 showPage('chat');
                 initChat();
@@ -145,6 +150,31 @@
         }, 3000);
     }
 
+    // --- Captcha ---
+
+    function loadCaptcha(questionElId, storeKey) {
+        fetch('/api/captcha')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var el = document.getElementById(questionElId);
+                if (el) el.textContent = data.question;
+                if (storeKey === 'login') loginCaptchaId = data.id;
+                else registerCaptchaId = data.id;
+            })
+            .catch(function () {
+                var el = document.getElementById(questionElId);
+                if (el) el.textContent = '加载失败，点击重试';
+            });
+    }
+
+    window.loadLoginCaptcha = function () {
+        loadCaptcha('user-login-captcha-question', 'login');
+    };
+
+    window.loadRegisterCaptcha = function () {
+        loadCaptcha('user-register-captcha-question', 'register');
+    };
+
     // --- User Login & Register ---
 
     window.showLoginForm = function () {
@@ -152,6 +182,7 @@
         var registerForm = document.getElementById('user-register-form');
         if (loginForm) loginForm.classList.remove('hidden');
         if (registerForm) registerForm.classList.add('hidden');
+        loadLoginCaptcha();
     };
 
     window.showRegisterForm = function () {
@@ -159,20 +190,27 @@
         var registerForm = document.getElementById('user-register-form');
         if (loginForm) loginForm.classList.add('hidden');
         if (registerForm) registerForm.classList.remove('hidden');
+        loadRegisterCaptcha();
     };
 
     window.handleUserLogin = function () {
         var emailInput = document.getElementById('user-login-email');
         var passwordInput = document.getElementById('user-login-password');
+        var captchaInput = document.getElementById('user-login-captcha');
         var errorEl = document.getElementById('user-login-error');
         var submitBtn = document.querySelector('#user-login-form .admin-submit-btn');
 
         if (!emailInput || !passwordInput) return;
         var email = emailInput.value.trim();
         var password = passwordInput.value;
+        var captchaAnswer = captchaInput ? parseInt(captchaInput.value.trim(), 10) : 0;
 
         if (!email || !password) {
             if (errorEl) { errorEl.textContent = '请输入邮箱和密码'; errorEl.classList.remove('hidden'); }
+            return;
+        }
+        if (!captchaInput || !captchaInput.value.trim()) {
+            if (errorEl) { errorEl.textContent = '请输入验证码'; errorEl.classList.remove('hidden'); }
             return;
         }
         if (errorEl) errorEl.classList.add('hidden');
@@ -181,7 +219,7 @@
         fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, password: password })
+            body: JSON.stringify({ email: email, password: password, captcha_id: loginCaptchaId, captcha_answer: captchaAnswer })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '登录失败'); });
@@ -195,6 +233,8 @@
         })
         .catch(function (err) {
             if (errorEl) { errorEl.textContent = err.message; errorEl.classList.remove('hidden'); }
+            if (captchaInput) captchaInput.value = '';
+            loadLoginCaptcha();
         })
         .finally(function () {
             if (submitBtn) submitBtn.disabled = false;
@@ -206,6 +246,7 @@
         var emailInput = document.getElementById('user-register-email');
         var passwordInput = document.getElementById('user-register-password');
         var confirmInput = document.getElementById('user-register-password-confirm');
+        var captchaInput = document.getElementById('user-register-captcha');
         var errorEl = document.getElementById('user-register-error');
         var successEl = document.getElementById('user-register-success');
         var submitBtn = document.querySelector('#user-register-form .admin-submit-btn');
@@ -215,11 +256,13 @@
         var email = emailInput.value.trim();
         var password = passwordInput.value;
         var confirm = confirmInput.value;
+        var captchaAnswer = captchaInput ? parseInt(captchaInput.value.trim(), 10) : 0;
 
         if (!email) { if (errorEl) { errorEl.textContent = '请输入邮箱'; errorEl.classList.remove('hidden'); } return; }
         if (!password) { if (errorEl) { errorEl.textContent = '请输入密码'; errorEl.classList.remove('hidden'); } return; }
         if (password.length < 6) { if (errorEl) { errorEl.textContent = '密码至少6位'; errorEl.classList.remove('hidden'); } return; }
         if (password !== confirm) { if (errorEl) { errorEl.textContent = '两次密码不一致'; errorEl.classList.remove('hidden'); } return; }
+        if (!captchaInput || !captchaInput.value.trim()) { if (errorEl) { errorEl.textContent = '请输入验证码'; errorEl.classList.remove('hidden'); } return; }
 
         if (errorEl) errorEl.classList.add('hidden');
         if (successEl) successEl.classList.add('hidden');
@@ -228,7 +271,7 @@
         fetch('/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: email, name: name, password: password })
+            body: JSON.stringify({ email: email, name: name, password: password, captcha_id: registerCaptchaId, captcha_answer: captchaAnswer })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '注册失败'); });
@@ -240,6 +283,8 @@
         })
         .catch(function (err) {
             if (errorEl) { errorEl.textContent = err.message; errorEl.classList.remove('hidden'); }
+            if (captchaInput) captchaInput.value = '';
+            loadRegisterCaptcha();
         })
         .finally(function () {
             if (submitBtn) submitBtn.disabled = false;
@@ -276,10 +321,10 @@
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
             var el = document.activeElement;
-            if (el && (el.id === 'user-login-email' || el.id === 'user-login-password')) {
+            if (el && (el.id === 'user-login-email' || el.id === 'user-login-password' || el.id === 'user-login-captcha')) {
                 window.handleUserLogin();
             }
-            if (el && (el.id === 'user-register-name' || el.id === 'user-register-email' || el.id === 'user-register-password' || el.id === 'user-register-password-confirm')) {
+            if (el && (el.id === 'user-register-name' || el.id === 'user-register-email' || el.id === 'user-register-password' || el.id === 'user-register-password-confirm' || el.id === 'user-register-captcha')) {
                 window.handleUserRegister();
             }
         }
@@ -476,7 +521,29 @@
             if (loginBtn) loginBtn.classList.remove('hidden');
             if (logoutBtn) logoutBtn.classList.add('hidden');
         }
-        renderChatMessages();
+
+        // Load product intro as welcome message if no messages yet
+        if (chatMessages.length === 0) {
+            fetch('/api/product-intro')
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (data.product_intro) {
+                        chatMessages.push({
+                            role: 'system',
+                            content: data.product_intro,
+                            sources: [],
+                            isPending: false,
+                            timestamp: Date.now()
+                        });
+                    }
+                    renderChatMessages();
+                })
+                .catch(function () {
+                    renderChatMessages();
+                });
+        } else {
+            renderChatMessages();
+        }
         setupChatInput();
     }
 
@@ -552,6 +619,15 @@
             html += '<span class="pending-icon">⏳</span>';
         }
         html += escapeHtml(msg.content);
+
+        // Display images from sources inline
+        if (msg.sources && msg.sources.length > 0) {
+            for (var k = 0; k < msg.sources.length; k++) {
+                if (msg.sources[k].image_url) {
+                    html += '<div class="chat-msg-image"><img src="' + escapeHtml(msg.sources[k].image_url) + '" alt="' + escapeHtml(msg.sources[k].document_name || '图片') + '" loading="lazy" style="max-width:100%;border-radius:8px;margin-top:8px;cursor:pointer;" onclick="window.open(this.src,\'_blank\')" /></div>';
+                }
+            }
+        }
         html += '</div>';
 
         // Sources
@@ -568,6 +644,9 @@
                 html += '<span class="chat-source-name">' + escapeHtml(src.document_name || '未知文档') + '</span>';
                 if (src.snippet) {
                     html += '<span class="chat-source-snippet">' + escapeHtml(src.snippet) + '</span>';
+                }
+                if (src.image_url) {
+                    html += '<span class="chat-source-snippet">📷 图片来源</span>';
                 }
                 html += '</li>';
             }
@@ -655,7 +734,7 @@
             })
         })
         .then(function (res) {
-            if (!res.ok) throw new Error('请求失败');
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '请求失败'); });
             return res.json();
         })
         .then(function (data) {
@@ -857,8 +936,17 @@
             var statusText = { processing: '处理中', success: '成功', failed: '失败' }[doc.status] || doc.status;
             var timeStr = doc.created_at ? new Date(doc.created_at).toLocaleString('zh-CN') : '-';
 
+            var nameCell = '';
+            if (doc.type === 'url') {
+                nameCell = '<a href="' + escapeHtml(doc.name) + '" target="_blank">' + escapeHtml(doc.name || '-') + '</a>';
+            } else if (doc.type === 'answer') {
+                nameCell = escapeHtml(doc.name || '-');
+            } else {
+                nameCell = '<a href="/api/documents/' + escapeHtml(doc.id) + '/download" target="_blank">' + escapeHtml(doc.name || '-') + '</a>';
+            }
+
             html += '<tr>' +
-                '<td>' + escapeHtml(doc.name || '-') + '</td>' +
+                '<td>' + nameCell + '</td>' +
                 '<td>' + escapeHtml(doc.type || '-') + '</td>' +
                 '<td><span class="admin-badge ' + statusClass + '">' + escapeHtml(statusText) + '</span></td>' +
                 '<td>' + escapeHtml(timeStr) + '</td>' +
@@ -961,12 +1049,22 @@
             }
 
             if (q.status !== 'answered') {
-                html += '<button class="btn-primary btn-sm" onclick="showAnswerDialog(\'' + escapeHtml(q.id) + '\', ' + JSON.stringify(escapeHtml(q.question || '')).replace(/'/g, "\\'") + ')">回答</button>';
+                html += '<button class="btn-primary btn-sm admin-answer-btn" data-id="' + escapeHtml(q.id) + '" data-question="' + escapeHtml(q.question || '') + '">回答</button>';
             }
 
             html += '</div>';
         }
         container.innerHTML = html;
+
+        // Bind answer button clicks
+        var answerBtns = container.querySelectorAll('.admin-answer-btn');
+        for (var j = 0; j < answerBtns.length; j++) {
+            (function(btn) {
+                btn.addEventListener('click', function() {
+                    showAnswerDialog(btn.getAttribute('data-id'), btn.getAttribute('data-question'));
+                });
+            })(answerBtns[j]);
+        }
     }
 
     // --- Answer Dialog ---
@@ -1051,6 +1149,8 @@
                 setVal('cfg-emb-model', emb.model_name);
                 setVal('cfg-emb-apikey', '');
                 setPlaceholder('cfg-emb-apikey', emb.api_key ? '***' : '未设置');
+                var mmSelect = document.getElementById('cfg-emb-multimodal');
+                if (mmSelect) mmSelect.value = emb.use_multimodal ? 'true' : 'false';
 
                 setVal('cfg-vec-chunksize', vec.chunk_size);
                 setVal('cfg-vec-overlap', vec.overlap);
@@ -1058,6 +1158,8 @@
                 setVal('cfg-vec-threshold', vec.threshold);
 
                 setVal('cfg-admin-login-route', admin.login_route || '/admin');
+
+                setVal('cfg-product-intro', cfg.product_intro || '');
 
                 var smtp = cfg.smtp || {};
                 setVal('cfg-smtp-host', smtp.host);
@@ -1152,6 +1254,8 @@
         if (embEndpoint) updates['embedding.endpoint'] = embEndpoint;
         if (embModel) updates['embedding.model_name'] = embModel;
         if (embApiKey) updates['embedding.api_key'] = embApiKey;
+        var embMultimodal = getVal('cfg-emb-multimodal');
+        updates['embedding.use_multimodal'] = embMultimodal === 'true';
 
         if (vecChunkSize !== '') updates['vector.chunk_size'] = parseInt(vecChunkSize, 10);
         if (vecOverlap !== '') updates['vector.overlap'] = parseInt(vecOverlap, 10);
@@ -1162,6 +1266,9 @@
         if (adminLoginRouteVal) {
             updates['admin.login_route'] = adminLoginRouteVal;
         }
+
+        var productIntro = getVal('cfg-product-intro');
+        updates['product_intro'] = productIntro;
 
         var smtpHost = getVal('cfg-smtp-host');
         var smtpPort = getVal('cfg-smtp-port');

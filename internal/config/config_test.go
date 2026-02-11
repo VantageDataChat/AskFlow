@@ -60,8 +60,8 @@ func TestLoad_CreatesDefaultOnMissing(t *testing.T) {
 	if cfg.Vector.TopK != 5 {
 		t.Errorf("TopK = %d, want 5", cfg.Vector.TopK)
 	}
-	if cfg.Vector.Threshold != 0.7 {
-		t.Errorf("Threshold = %f, want 0.7", cfg.Vector.Threshold)
+	if cfg.Vector.Threshold != 0.5 {
+		t.Errorf("Threshold = %f, want 0.5", cfg.Vector.Threshold)
 	}
 	if cfg.LLM.Temperature != 0.3 {
 		t.Errorf("Temperature = %f, want 0.3", cfg.LLM.Temperature)

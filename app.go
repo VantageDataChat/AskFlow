@@ -7,13 +7,17 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	mrand "math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"helpdesk/internal/auth"
 	"helpdesk/internal/config"
 	"helpdesk/internal/document"
 	"helpdesk/internal/email"
+	"helpdesk/internal/embedding"
+	"helpdesk/internal/llm"
 	"helpdesk/internal/pending"
 	"helpdesk/internal/query"
 )
@@ -393,6 +397,80 @@ func (a *App) UserLogin(email, password string) (*UserLoginResponse, error) {
 	}, nil
 }
 
+// --- Captcha System ---
+
+type captchaEntry struct {
+	answer    int
+	expiresAt time.Time
+}
+
+var (
+	captchaStore = make(map[string]captchaEntry)
+	captchaMu    sync.Mutex
+)
+
+// CaptchaResponse holds the captcha ID and question text.
+type CaptchaResponse struct {
+	ID       string `json:"id"`
+	Question string `json:"question"`
+}
+
+// GenerateCaptcha creates a math captcha (two-digit op single-digit).
+func GenerateCaptcha() *CaptchaResponse {
+	captchaMu.Lock()
+	defer captchaMu.Unlock()
+
+	// Clean expired entries
+	now := time.Now()
+	for k, v := range captchaStore {
+		if now.After(v.expiresAt) {
+			delete(captchaStore, k)
+		}
+	}
+
+	a := mrand.Intn(90) + 10 // 10-99
+	b := mrand.Intn(9) + 1   // 1-9
+	ops := []string{"+", "-", "×"}
+	op := ops[mrand.Intn(3)]
+
+	var answer int
+	switch op {
+	case "+":
+		answer = a + b
+	case "-":
+		answer = a - b
+	case "×":
+		answer = a * b
+	}
+
+	id := fmt.Sprintf("cap_%d", now.UnixNano())
+	captchaStore[id] = captchaEntry{
+		answer:    answer,
+		expiresAt: now.Add(5 * time.Minute),
+	}
+
+	return &CaptchaResponse{
+		ID:       id,
+		Question: fmt.Sprintf("%d %s %d = ?", a, op, b),
+	}
+}
+
+// ValidateCaptcha checks if the answer is correct for the given captcha ID.
+func ValidateCaptcha(id string, answer int) bool {
+	captchaMu.Lock()
+	defer captchaMu.Unlock()
+
+	entry, ok := captchaStore[id]
+	if !ok {
+		return false
+	}
+	delete(captchaStore, id) // one-time use
+	if time.Now().After(entry.expiresAt) {
+		return false
+	}
+	return entry.answer == answer
+}
+
 func generateToken() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -414,12 +492,13 @@ func (a *App) TestEmail(toEmail string) error {
 
 // MaskedConfig is a copy of Config with API keys replaced by "***".
 type MaskedConfig struct {
-	LLM       config.LLMConfig       `json:"llm"`
-	Embedding config.EmbeddingConfig `json:"embedding"`
-	Vector    config.VectorConfig    `json:"vector"`
-	OAuth     MaskedOAuthConfig      `json:"oauth"`
-	Admin     config.AdminConfig     `json:"admin"`
-	SMTP      config.SMTPConfig      `json:"smtp"`
+	LLM          config.LLMConfig       `json:"llm"`
+	Embedding    config.EmbeddingConfig `json:"embedding"`
+	Vector       config.VectorConfig    `json:"vector"`
+	OAuth        MaskedOAuthConfig      `json:"oauth"`
+	Admin        config.AdminConfig     `json:"admin"`
+	SMTP         config.SMTPConfig      `json:"smtp"`
+	ProductIntro string                 `json:"product_intro"`
 }
 
 // MaskedOAuthConfig holds OAuth config with secrets masked.
@@ -445,11 +524,12 @@ func (a *App) GetConfig() *MaskedConfig {
 	}
 
 	masked := &MaskedConfig{
-		LLM:       cfg.LLM,
-		Embedding: cfg.Embedding,
-		Vector:    cfg.Vector,
-		Admin:     cfg.Admin,
-		SMTP:      cfg.SMTP,
+		LLM:          cfg.LLM,
+		Embedding:    cfg.Embedding,
+		Vector:       cfg.Vector,
+		Admin:        cfg.Admin,
+		SMTP:         cfg.SMTP,
+		ProductIntro: cfg.ProductIntro,
 	}
 
 	// Mask API keys
@@ -480,7 +560,17 @@ func (a *App) GetConfig() *MaskedConfig {
 
 // UpdateConfig applies partial configuration updates.
 func (a *App) UpdateConfig(updates map[string]interface{}) error {
-	return a.configManager.Update(updates)
+	if err := a.configManager.Update(updates); err != nil {
+		return err
+	}
+	// Refresh services with new config
+	cfg := a.configManager.Get()
+	es := embedding.NewAPIEmbeddingService(cfg.Embedding.Endpoint, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.UseMultimodal)
+	ls := llm.NewAPILLMService(cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.ModelName, cfg.LLM.Temperature, cfg.LLM.MaxTokens)
+	a.queryEngine.UpdateServices(es, ls, cfg)
+	a.docManager.UpdateEmbeddingService(es)
+	a.pendingManager.UpdateServices(es, ls)
+	return nil
 }
 
 // maskSecret replaces a non-empty secret with "***".

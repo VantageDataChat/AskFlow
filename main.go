@@ -53,7 +53,7 @@ func main() {
 	vs := vectorstore.NewSQLiteVectorStore(database)
 	tc := &chunker.TextChunker{ChunkSize: cfg.Vector.ChunkSize, Overlap: cfg.Vector.Overlap}
 	dp := &parser.DocumentParser{}
-	es := embedding.NewAPIEmbeddingService(cfg.Embedding.Endpoint, cfg.Embedding.APIKey, cfg.Embedding.ModelName)
+	es := embedding.NewAPIEmbeddingService(cfg.Embedding.Endpoint, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.UseMultimodal)
 	ls := llm.NewAPILLMService(cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.ModelName, cfg.LLM.Temperature, cfg.LLM.MaxTokens)
 	dm := document.NewDocumentManager(dp, tc, es, vs, database)
 	qe := query.NewQueryEngine(es, vs, ls, database, cfg)
@@ -95,6 +95,10 @@ func registerAPIHandlers(app *App) {
 	http.HandleFunc("/api/auth/register", handleRegister(app))
 	http.HandleFunc("/api/auth/login", handleUserLogin(app))
 	http.HandleFunc("/api/auth/verify", handleVerifyEmail(app))
+	http.HandleFunc("/api/captcha", handleCaptcha())
+
+	// Public info
+	http.HandleFunc("/api/product-intro", handleProductIntro(app))
 
 	// Query
 	http.HandleFunc("/api/query", handleQuery(app))
@@ -243,15 +247,34 @@ func handleAdminStatus(app *App) http.HandlerFunc {
 
 // --- User registration & login handlers ---
 
+func handleCaptcha() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		cap := GenerateCaptcha()
+		writeJSON(w, http.StatusOK, cap)
+	}
+}
+
 func handleRegister(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		var req RegisterRequest
+		var req struct {
+			RegisterRequest
+			CaptchaID     string `json:"captcha_id"`
+			CaptchaAnswer int    `json:"captcha_answer"`
+		}
 		if err := readJSONBody(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !ValidateCaptcha(req.CaptchaID, req.CaptchaAnswer) {
+			writeError(w, http.StatusBadRequest, "验证码错误")
 			return
 		}
 		baseURL := "http://" + r.Host
@@ -261,7 +284,7 @@ func handleRegister(app *App) http.HandlerFunc {
 		if fwd := r.Header.Get("X-Forwarded-Proto"); fwd != "" {
 			baseURL = fwd + "://" + r.Host
 		}
-		if err := app.Register(req, baseURL); err != nil {
+		if err := app.Register(req.RegisterRequest, baseURL); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -276,11 +299,17 @@ func handleUserLogin(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Email    string `json:"email"`
-			Password string `json:"password"`
+			Email         string `json:"email"`
+			Password      string `json:"password"`
+			CaptchaID     string `json:"captcha_id"`
+			CaptchaAnswer int    `json:"captcha_answer"`
 		}
 		if err := readJSONBody(r, &req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !ValidateCaptcha(req.CaptchaID, req.CaptchaAnswer) {
+			writeError(w, http.StatusBadRequest, "验证码错误")
 			return
 		}
 		resp, err := app.UserLogin(req.Email, req.Password)
@@ -304,6 +333,19 @@ func handleVerifyEmail(app *App) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "message": "邮箱验证成功，请登录"})
+	}
+}
+
+// --- Product intro handler ---
+
+func handleProductIntro(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		cfg := app.configManager.Get()
+		writeJSON(w, http.StatusOK, map[string]string{"product_intro": cfg.ProductIntro})
 	}
 }
 
@@ -414,14 +456,32 @@ func handleDocumentURL(app *App) http.HandlerFunc {
 
 func handleDocumentByID(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Extract document ID from path: /api/documents/{id}
+		// Extract path after /api/documents/
 		path := strings.TrimPrefix(r.URL.Path, "/api/documents/")
 		if path == "" || path == r.URL.Path {
 			writeError(w, http.StatusBadRequest, "missing document ID")
 			return
 		}
-		docID := path
 
+		// Handle /api/documents/{id}/download
+		if strings.HasSuffix(path, "/download") {
+			docID := strings.TrimSuffix(path, "/download")
+			if r.Method != http.MethodGet {
+				writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+				return
+			}
+			filePath, fileName, err := app.docManager.GetFilePath(docID)
+			if err != nil {
+				writeError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			w.Header().Set("Content-Disposition", "inline; filename=\""+fileName+"\"")
+			http.ServeFile(w, r, filePath)
+			return
+		}
+
+		// Handle DELETE /api/documents/{id}
+		docID := path
 		if r.Method != http.MethodDelete {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
@@ -541,6 +601,8 @@ func detectFileType(filename string) string {
 		return "excel"
 	case strings.HasSuffix(lower, ".pptx"), strings.HasSuffix(lower, ".ppt"):
 		return "ppt"
+	case strings.HasSuffix(lower, ".md"), strings.HasSuffix(lower, ".markdown"):
+		return "markdown"
 	default:
 		return "unknown"
 	}

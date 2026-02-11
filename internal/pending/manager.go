@@ -59,6 +59,12 @@ func NewPendingQuestionManager(
 	}
 }
 
+// UpdateServices replaces the embedding and LLM services (used after config change).
+func (pm *PendingQuestionManager) UpdateServices(es embedding.EmbeddingService, ls llm.LLMService) {
+	pm.embeddingService = es
+	pm.llmService = ls
+}
+
 // generateID creates a random hex string for use as a unique identifier.
 func generateID() (string, error) {
 	b := make([]byte, 16)
@@ -169,12 +175,15 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 		return fmt.Errorf("failed to update answer text: %w", err)
 	}
 
-	// Step 3: Chunk the answer → embed → store in vector store
+	// Step 3: Chunk the Q&A content → embed → store in vector store
 	if answerText != "" {
 		docID := "pending-answer-" + req.QuestionID
 		docName := "管理员回答: " + truncate(question, 50)
 
-		chunks := pm.chunker.Split(answerText, docID)
+		// Combine question and answer for better semantic matching
+		qaText := "问题：" + question + "\n回答：" + answerText
+
+		chunks := pm.chunker.Split(qaText, docID)
 		if len(chunks) > 0 {
 			texts := make([]string, len(chunks))
 			for i, c := range chunks {
