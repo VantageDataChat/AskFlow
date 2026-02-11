@@ -60,7 +60,7 @@ func Generate() *Response {
 		expiresAt: now.Add(5 * time.Minute),
 	}
 
-	img := renderCaptcha(answer, 160, 50)
+	img := renderCaptcha(answer, 320, 100)
 
 	var buf bytes.Buffer
 	png.Encode(&buf, img)
@@ -228,20 +228,21 @@ func drawChar(img *image.RGBA, cx, cy int, ch byte, c color.RGBA) {
 		return
 	}
 	// Each glyph is 8 rows of 6-bit wide patterns
-	startX := cx - 3
-	startY := cy - 7
+	startX := cx - 6
+	startY := cy - 14
 	// Apply slight rotation via skew
 	skew := float64(mrand.Intn(5)-2) * 0.15
 	for row := 0; row < len(glyph); row++ {
 		for col := 0; col < 6; col++ {
 			if glyph[row]&(1<<(5-col)) != 0 {
-				px := startX + col + int(math.Round(float64(row)*skew))
-				py := startY + row
-				// Draw 2x2 for boldness
-				img.Set(px, py, c)
-				img.Set(px+1, py, c)
-				img.Set(px, py+1, c)
-				img.Set(px+1, py+1, c)
+				px := startX + col*2 + int(math.Round(float64(row)*skew))
+				py := startY + row*2
+				// Draw 4x4 block for larger text
+				for dy := 0; dy < 4; dy++ {
+					for dx := 0; dx < 4; dx++ {
+						img.Set(px+dx, py+dy, c)
+					}
+				}
 			}
 		}
 	}

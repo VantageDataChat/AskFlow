@@ -1,19 +1,15 @@
 @echo off
 setlocal
 
-REM Read credentials from environment variables (never hardcode secrets!)
+REM Read credentials from environment variables, or prompt interactively
 if "%DEPLOY_SERVER%"=="" (
-    echo [ERROR] DEPLOY_SERVER environment variable not set.
-    echo         Set it with: set DEPLOY_SERVER=your.server.host
-    exit /b 1
+    set /p DEPLOY_SERVER="Enter server address: "
 )
 if "%DEPLOY_USER%"=="" (
-    echo [ERROR] DEPLOY_USER environment variable not set.
-    exit /b 1
+    set /p DEPLOY_USER="Enter SSH username: "
 )
 if "%DEPLOY_PASS%"=="" (
-    echo [ERROR] DEPLOY_PASS environment variable not set.
-    exit /b 1
+    set /p DEPLOY_PASS="Enter SSH password: "
 )
 set SERVER=%DEPLOY_SERVER%
 set USER=%DEPLOY_USER%
@@ -81,3 +77,4 @@ echo  URL: http://%SERVER%
 echo ============================================
 
 endlocal
+pause

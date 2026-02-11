@@ -1185,6 +1185,8 @@ func handleTestLLM(app *App) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Mark LLM as tested successfully
+		app.configManager.Update(map[string]interface{}{"llm_tested": true})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "reply": answer})
 	}
 }
@@ -1222,6 +1224,8 @@ func handleTestEmbedding(app *App) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		// Mark Embedding as tested successfully
+		app.configManager.Update(map[string]interface{}{"embedding_tested": true})
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "dimensions": len(vec)})
 	}
 }

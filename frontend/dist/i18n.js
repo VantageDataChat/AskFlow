@@ -13,8 +13,8 @@
             'site_title': '软件自助服务平台',
 
             // Setup page (system not configured)
-            'setup_title': '系统配置中',
-            'setup_message': '系统正在安装配置中，请稍后再来。',
+            'setup_title': '系统启动准备中',
+            'setup_message': '系统启动准备中，请稍后...',
             'setup_hint': '管理员正在配置系统，配置完成后即可正常使用。',
             'setup_refresh': '刷新页面',
 
@@ -331,8 +331,8 @@
             'site_title': 'Software Self-Service Platform',
 
             // Setup page (system not configured)
-            'setup_title': 'System Setup In Progress',
-            'setup_message': 'The system is being configured. Please check back later.',
+            'setup_title': 'System Preparing',
+            'setup_message': 'System is preparing, please wait...',
             'setup_hint': 'The administrator is setting up the system. It will be available once configuration is complete.',
             'setup_refresh': 'Refresh Page',
 
