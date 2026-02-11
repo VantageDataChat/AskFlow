@@ -245,6 +245,7 @@ func registerAPIHandlers(app *App) {
 
 	// Pending questions
 	http.HandleFunc("/api/pending/answer", handlePendingAnswer(app))
+	http.HandleFunc("/api/pending/", handlePendingByID(app))
 	http.HandleFunc("/api/pending", handlePending(app))
 
 	// Config (with role check)
@@ -679,6 +680,25 @@ func handlePendingAnswer(app *App) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+
+func handlePendingByID(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/pending/")
+		if id == "" || id == "answer" {
+			writeError(w, http.StatusBadRequest, "missing question ID")
+			return
+		}
+		if r.Method != http.MethodDelete {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if err := app.DeletePendingQuestion(id); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}
 }
 

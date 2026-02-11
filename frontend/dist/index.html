@@ -551,6 +551,14 @@
                         <textarea id="admin-answer-text" rows="4" placeholder="输入回答内容"></textarea>
                     </div>
                     <div class="admin-form-row">
+                        <label>图片（可选，支持粘贴/拖拽/点击上传）</label>
+                        <div id="answer-image-upload-area" class="upload-area upload-area-sm">
+                            <input type="file" id="answer-image-input" accept="image/*" multiple hidden>
+                            <span>点击选择图片，或拖拽/粘贴图片到此处</span>
+                        </div>
+                        <div id="answer-image-preview" class="knowledge-image-preview"></div>
+                    </div>
+                    <div class="admin-form-row">
                         <label>相关URL（可选）</label>
                         <input type="text" id="admin-answer-url" placeholder="https://...">
                     </div>

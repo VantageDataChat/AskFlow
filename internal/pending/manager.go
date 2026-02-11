@@ -27,10 +27,11 @@ type PendingQuestion struct {
 
 // AdminAnswerRequest represents an admin's answer to a pending question.
 type AdminAnswerRequest struct {
-	QuestionID string `json:"question_id"`
-	Text       string `json:"text,omitempty"`
-	ImageData  []byte `json:"image_data,omitempty"`
-	URL        string `json:"url,omitempty"`
+	QuestionID string   `json:"question_id"`
+	Text       string   `json:"text,omitempty"`
+	ImageData  []byte   `json:"image_data,omitempty"`
+	URL        string   `json:"url,omitempty"`
+	ImageURLs  []string `json:"image_urls,omitempty"`
 }
 
 // PendingQuestionManager handles the lifecycle of pending questions.
@@ -97,6 +98,32 @@ func (pm *PendingQuestionManager) CreatePending(question string, userID string) 
 		Status:    "pending",
 		CreatedAt: now,
 	}, nil
+}
+
+// DeletePending removes a pending question by ID.
+// If the question was answered, it also cleans up the associated document and vector data.
+func (pm *PendingQuestionManager) DeletePending(id string) error {
+	var status string
+	err := pm.db.QueryRow(`SELECT status FROM pending_questions WHERE id = ?`, id).Scan(&status)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pending question not found: %s", id)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query pending question: %w", err)
+	}
+
+	// If answered, clean up the associated vector store data and document record
+	if status == "answered" {
+		docID := "pending-answer-" + id
+		_ = pm.vectorStore.DeleteByDocID(docID)
+		_, _ = pm.db.Exec(`DELETE FROM documents WHERE id = ?`, docID)
+	}
+
+	_, err = pm.db.Exec(`DELETE FROM pending_questions WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete pending question: %w", err)
+	}
+	return nil
 }
 
 // ListPending returns pending questions filtered by status (or all if status is empty),
@@ -176,10 +203,11 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 	}
 
 	// Step 3: Chunk the Q&A content → embed → store in vector store
-	if answerText != "" {
-		docID := "pending-answer-" + req.QuestionID
-		docName := "管理员回答: " + truncate(question, 50)
+	docID := "pending-answer-" + req.QuestionID
+	docName := "管理员回答: " + truncate(question, 50)
+	docCreated := false
 
+	if answerText != "" {
 		// Combine question and answer for better semantic matching
 		qaText := "问题：" + question + "\n回答：" + answerText
 
@@ -203,6 +231,7 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert document record for answer: %w", err)
 			}
+			docCreated = true
 
 			vectorChunks := make([]vectorstore.VectorChunk, len(chunks))
 			for i, c := range chunks {
@@ -217,6 +246,42 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 
 			if err := pm.vectorStore.Store(docID, vectorChunks); err != nil {
 				return fmt.Errorf("failed to store answer in vector store: %w", err)
+			}
+		}
+	}
+
+	// Step 3.5: Store image references as searchable vector chunks
+	if len(req.ImageURLs) > 0 {
+		if !docCreated {
+			_, err = pm.db.Exec(
+				`INSERT INTO documents (id, name, type, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+				docID, docName, "answer", "success", time.Now().UTC(),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert document record for answer images: %w", err)
+			}
+		}
+
+		imgText := fmt.Sprintf("[图片回答: %s] %s", truncate(question, 50), answerText)
+		for i, imgURL := range req.ImageURLs {
+			if imgURL == "" {
+				continue
+			}
+			vec, embErr := pm.embeddingService.Embed(imgText)
+			if embErr != nil {
+				fmt.Printf("Warning: failed to embed answer image text %d: %v\n", i, embErr)
+				continue
+			}
+			imgChunk := []vectorstore.VectorChunk{{
+				ChunkText:    fmt.Sprintf("[图片回答: %s]", truncate(question, 50)),
+				ChunkIndex:   1000 + i,
+				DocumentID:   docID,
+				DocumentName: docName,
+				Vector:       vec,
+				ImageURL:     imgURL,
+			}}
+			if storeErr := pm.vectorStore.Store(docID, imgChunk); storeErr != nil {
+				fmt.Printf("Warning: failed to store answer image chunk %d: %v\n", i, storeErr)
 			}
 		}
 	}

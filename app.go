@@ -103,6 +103,10 @@ func (a *App) ListPendingQuestions(status string) ([]pending.PendingQuestion, er
 func (a *App) AnswerQuestion(req pending.AdminAnswerRequest) error {
 	return a.pendingManager.AnswerQuestion(req)
 }
+// DeletePendingQuestion removes a pending question by ID.
+func (a *App) DeletePendingQuestion(id string) error {
+	return a.pendingManager.DeletePending(id)
+}
 
 // --- Authentication Interface ---
 

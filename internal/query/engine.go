@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"time"
 
@@ -142,11 +143,12 @@ func (qe *QueryEngine) classifyIntent(question string) (*IntentResult, error) {
 // 3. If results found, call LLM to generate an answer with source references
 // 4. If no results, create a pending question and notify the user
 func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
-	// Step 0: Intent classification
-	intent, err := qe.classifyIntent(req.Question)
-	if err == nil {
-		switch intent.Intent {
-		case "greeting":
+	// Step 0: Intent classification (skip if image is attached — image may contain product info)
+	if req.ImageData == "" {
+		intent, err := qe.classifyIntent(req.Question)
+		if err == nil {
+			switch intent.Intent {
+			case "greeting":
 			// Return product intro as greeting response, in the user's language
 			intro := "您好！欢迎使用我们的产品。"
 			if qe.config != nil && qe.config.ProductIntro != "" {
@@ -176,6 +178,7 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 				msg = translated
 			}
 			return &QueryResponse{Answer: msg}, nil
+		}
 		}
 	}
 
@@ -224,6 +227,23 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 
 	// Step 4: If still no results, create pending question
 	if len(results) == 0 {
+		// Check for existing similar pending question first
+		if existing := qe.findSimilarPendingQuestion(req.Question, queryVector); existing != "" {
+			pendingMsg := "该问题已在处理中，请耐心等待回复"
+			translated, tErr := qe.llmService.Generate(
+				"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
+				[]string{pendingMsg},
+				req.Question,
+			)
+			if tErr == nil && translated != "" {
+				pendingMsg = translated
+			}
+			return &QueryResponse{
+				IsPending: true,
+				Message:   pendingMsg,
+			}, nil
+		}
+
 		if err := qe.createPendingQuestion(req.Question, req.UserID); err != nil {
 			return nil, fmt.Errorf("failed to create pending question: %w", err)
 		}
@@ -276,8 +296,12 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 	isPending := false
 	if isUnableToAnswer(answer) {
 		log.Printf("[Query] LLM answer indicates unable to answer, creating pending question")
-		_ = qe.createPendingQuestion(req.Question, req.UserID)
-		isPending = true
+		if existing := qe.findSimilarPendingQuestion(req.Question, queryVector); existing != "" {
+			isPending = true
+		} else {
+			_ = qe.createPendingQuestion(req.Question, req.UserID)
+			isPending = true
+		}
 	}
 
 	// Step 6: Build source references
@@ -356,6 +380,62 @@ func (qe *QueryEngine) findDocumentImages(results []vectorstore.SearchResult) []
 	}
 
 	return images
+}
+
+// findSimilarPendingQuestion checks if there's already a pending question similar
+// to the given question. Uses the pre-computed query vector to avoid re-embedding.
+// Returns the existing question text if found, empty string otherwise.
+func (qe *QueryEngine) findSimilarPendingQuestion(question string, queryVector []float64) string {
+	rows, err := qe.db.Query(
+		`SELECT question FROM pending_questions WHERE status = 'pending' ORDER BY created_at DESC LIMIT 50`,
+	)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var pendingQuestions []string
+	for rows.Next() {
+		var q string
+		if err := rows.Scan(&q); err != nil {
+			continue
+		}
+		pendingQuestions = append(pendingQuestions, q)
+	}
+	if len(pendingQuestions) == 0 {
+		return ""
+	}
+
+	// Batch embed all pending questions
+	pqVecs, err := qe.embeddingService.EmbedBatch(pendingQuestions)
+	if err != nil {
+		return ""
+	}
+
+	for i, pqVec := range pqVecs {
+		sim := cosineSimilarity(queryVector, pqVec)
+		if sim >= 0.85 {
+			return pendingQuestions[i]
+		}
+	}
+	return ""
+}
+
+// cosineSimilarity computes the cosine similarity between two vectors.
+func cosineSimilarity(a, b []float64) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += a[i] * b[i]
+		normA += a[i] * a[i]
+		normB += b[i] * b[i]
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
 }
 
 // createPendingQuestion inserts a new pending question record into the database.

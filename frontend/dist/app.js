@@ -753,6 +753,30 @@
         if (btn) btn.classList.toggle('open');
     };
 
+    // Helper: add/remove progress overlay on an element
+    function addProgressOverlay(container, indeterminate, id) {
+        var overlay = document.createElement('div');
+        overlay.className = 'img-progress-overlay';
+        if (id) overlay.id = id;
+        var bar = document.createElement('div');
+        bar.className = 'img-progress-bar' + (indeterminate ? ' indeterminate' : '');
+        overlay.appendChild(bar);
+        container.appendChild(overlay);
+        return bar;
+    }
+
+    function removeProgressOverlay(container, id) {
+        var el = id ? document.getElementById(id) : container.querySelector('.img-progress-overlay');
+        if (el) el.remove();
+    }
+
+    function setProgressBar(bar, pct) {
+        if (bar) {
+            bar.classList.remove('indeterminate');
+            bar.style.width = Math.min(pct, 100) + '%';
+        }
+    }
+
     window.sendChatMessage = function () {
         var input = document.getElementById('chat-input');
         var sendBtn = document.getElementById('chat-send-btn');
@@ -778,13 +802,21 @@
         }
         chatMessages.push(userMsg);
 
+        // Show indeterminate progress on chat image preview if image was pasted
+        var chatPreview = document.getElementById('chat-image-preview');
+        var hadImage = !!imageData;
+        if (hadImage && chatPreview) {
+            addProgressOverlay(chatPreview, true, 'chat-img-progress');
+        }
+
         // Clear input, image, and reset height
         input.value = '';
         input.style.height = 'auto';
         chatPendingImage = null;
-        var preview = document.getElementById('chat-image-preview');
-        if (preview) preview.classList.add('hidden');
         if (sendBtn) sendBtn.disabled = true;
+
+        // Don't hide preview yet if we're showing progress on it
+        if (!hadImage && chatPreview) chatPreview.classList.add('hidden');
 
         // Show loading
         chatLoading = true;
@@ -837,6 +869,11 @@
         })
         .finally(function () {
             chatLoading = false;
+            // Hide chat image preview and remove progress
+            if (chatPreview) {
+                chatPreview.classList.add('hidden');
+                removeProgressOverlay(chatPreview, 'chat-img-progress');
+            }
             renderChatMessages();
             if (input) input.focus();
         });
@@ -964,21 +1001,44 @@
 
         showAdminToast('正在上传 ' + file.name + '...', 'info');
 
-        adminFetch('/api/documents/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(function (res) {
-            if (!res.ok) throw new Error('上传失败');
-            return res.json();
-        })
-        .then(function () {
-            showAdminToast('文件上传成功', 'success');
-            loadDocumentList();
-        })
-        .catch(function (err) {
-            showAdminToast(err.message || '上传失败', 'error');
-        });
+        // Show progress bar on drop zone
+        var zone = document.getElementById('admin-drop-zone');
+        var progressBar = null;
+        if (zone) {
+            removeProgressOverlay(zone);
+            progressBar = addProgressOverlay(zone, false, 'upload-drop-progress');
+        }
+
+        var token = getAdminToken();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/documents/upload', true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable && progressBar) {
+                setProgressBar(progressBar, (e.loaded / e.total) * 90);
+            }
+        };
+
+        xhr.onload = function () {
+            if (progressBar) setProgressBar(progressBar, 100);
+            setTimeout(function () {
+                if (zone) removeProgressOverlay(zone, 'upload-drop-progress');
+            }, 400);
+            if (xhr.status >= 200 && xhr.status < 300) {
+                showAdminToast('文件上传成功', 'success');
+                loadDocumentList();
+            } else {
+                showAdminToast('上传失败', 'error');
+            }
+        };
+
+        xhr.onerror = function () {
+            if (zone) removeProgressOverlay(zone, 'upload-drop-progress');
+            showAdminToast('上传失败', 'error');
+        };
+
+        xhr.send(formData);
     }
 
     window.handleAdminURLSubmit = function () {
@@ -1157,6 +1217,8 @@
                 html += '<button class="btn-primary btn-sm admin-answer-btn" data-id="' + escapeHtml(q.id) + '" data-question="' + escapeHtml(q.question || '') + '">回答</button>';
             }
 
+            html += ' <button class="btn-danger btn-sm admin-delete-pending-btn" data-id="' + escapeHtml(q.id) + '">删除</button>';
+
             html += '</div>';
         }
         container.innerHTML = html;
@@ -1170,9 +1232,144 @@
                 });
             })(answerBtns[j]);
         }
+
+        // Bind delete button clicks
+        var deleteBtns = container.querySelectorAll('.admin-delete-pending-btn');
+        for (var k = 0; k < deleteBtns.length; k++) {
+            (function(btn) {
+                btn.addEventListener('click', function() {
+                    var qid = btn.getAttribute('data-id');
+                    if (!confirm('确定要删除这个问题吗？')) return;
+                    adminFetch('/api/pending/' + encodeURIComponent(qid), { method: 'DELETE' })
+                        .then(function(res) {
+                            if (!res.ok) throw new Error('删除失败');
+                            showAdminToast('已删除', 'success');
+                            loadPendingQuestions();
+                        })
+                        .catch(function(err) {
+                            showAdminToast(err.message || '删除失败', 'error');
+                        });
+                });
+            })(deleteBtns[k]);
+        }
     }
 
     // --- Answer Dialog ---
+
+    var answerImageURLs = [];
+
+    function initAnswerImageZone() {
+        var area = document.getElementById('answer-image-upload-area');
+        var input = document.getElementById('answer-image-input');
+        if (!area || !input) return;
+
+        area.onclick = function () { input.click(); };
+
+        input.onchange = function () {
+            if (input.files && input.files.length > 0) {
+                for (var i = 0; i < input.files.length; i++) {
+                    uploadAnswerImage(input.files[i]);
+                }
+                input.value = '';
+            }
+        };
+
+        area.ondragover = function (e) { e.preventDefault(); area.classList.add('dragover'); };
+        area.ondragleave = function () { area.classList.remove('dragover'); };
+        area.ondrop = function (e) {
+            e.preventDefault();
+            area.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            for (var i = 0; i < files.length; i++) {
+                if (files[i].type.indexOf('image/') === 0) uploadAnswerImage(files[i]);
+            }
+        };
+
+        // Clipboard paste on the dialog
+        var dialog = document.getElementById('admin-answer-dialog');
+        if (dialog) {
+            dialog.onpaste = function (e) {
+                var items = (e.clipboardData || e.originalEvent.clipboardData || {}).items;
+                if (!items) return;
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image/') === 0) {
+                        e.preventDefault();
+                        var blob = items[i].getAsFile();
+                        if (blob) uploadAnswerImage(blob);
+                    }
+                }
+            };
+        }
+    }
+
+    function uploadAnswerImage(file) {
+        if (file.type.indexOf('image/') !== 0) {
+            showAdminToast('请选择图片文件', 'error');
+            return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+            showAdminToast('图片大小不能超过10MB', 'error');
+            return;
+        }
+
+        var preview = document.getElementById('answer-image-preview');
+        var item = document.createElement('div');
+        item.className = 'knowledge-image-item uploading';
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        item.appendChild(img);
+        preview.appendChild(item);
+
+        // Add progress bar on this image item
+        var progressBar = addProgressOverlay(item, false);
+
+        var formData = new FormData();
+        formData.append('image', file, file.name || 'paste.png');
+
+        var token = getAdminToken();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/images/upload', true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable && progressBar) {
+                setProgressBar(progressBar, (e.loaded / e.total) * 90);
+            }
+        };
+
+        xhr.onload = function () {
+            if (progressBar) setProgressBar(progressBar, 100);
+            setTimeout(function () { removeProgressOverlay(item); }, 300);
+            item.classList.remove('uploading');
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                var data;
+                try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+                var idx = answerImageURLs.length;
+                answerImageURLs.push(data.url);
+
+                var removeBtn = document.createElement('button');
+                removeBtn.className = 'knowledge-image-remove';
+                removeBtn.textContent = '×';
+                removeBtn.setAttribute('aria-label', '删除图片');
+                removeBtn.onclick = function () {
+                    answerImageURLs[idx] = null;
+                    item.remove();
+                };
+                item.appendChild(removeBtn);
+            } else {
+                item.remove();
+                showAdminToast('图片上传失败', 'error');
+            }
+        };
+
+        xhr.onerror = function () {
+            item.remove();
+            showAdminToast('图片上传失败', 'error');
+        };
+
+        xhr.send(formData);
+    }
 
     window.showAnswerDialog = function (questionId, questionText) {
         adminAnswerTargetId = questionId;
@@ -1182,12 +1379,19 @@
         if (answerInput) answerInput.value = '';
         var urlInput = document.getElementById('admin-answer-url');
         if (urlInput) urlInput.value = '';
+        answerImageURLs = [];
+        var preview = document.getElementById('answer-image-preview');
+        if (preview) preview.innerHTML = '';
         var dialog = document.getElementById('admin-answer-dialog');
         if (dialog) dialog.classList.remove('hidden');
+        initAnswerImageZone();
     };
 
     window.closeAnswerDialog = function () {
         adminAnswerTargetId = null;
+        answerImageURLs = [];
+        var preview = document.getElementById('answer-image-preview');
+        if (preview) preview.innerHTML = '';
         var dialog = document.getElementById('admin-answer-dialog');
         if (dialog) dialog.classList.add('hidden');
     };
@@ -1197,9 +1401,10 @@
 
         var text = (document.getElementById('admin-answer-text') || {}).value || '';
         var url = (document.getElementById('admin-answer-url') || {}).value || '';
+        var imageUrls = answerImageURLs.filter(function (u) { return u; });
 
-        if (!text.trim() && !url.trim()) {
-            showAdminToast('请输入回答内容', 'error');
+        if (!text.trim() && !url.trim() && imageUrls.length === 0) {
+            showAdminToast('请输入回答内容或上传图片', 'error');
             return;
         }
 
@@ -1212,7 +1417,8 @@
             body: JSON.stringify({
                 question_id: adminAnswerTargetId,
                 text: text.trim(),
-                url: url.trim()
+                url: url.trim(),
+                image_urls: imageUrls
             })
         })
         .then(function (res) {
@@ -1513,37 +1719,56 @@
         item.appendChild(img);
         preview.appendChild(item);
 
+        // Add progress bar overlay on this image item
+        var progressBar = addProgressOverlay(item, false);
+
         var formData = new FormData();
         formData.append('image', file, file.name || 'paste.png');
 
-        adminFetch('/api/images/upload', {
-            method: 'POST',
-            body: formData
-        })
-        .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '上传失败'); });
-            return res.json();
-        })
-        .then(function (data) {
-            item.classList.remove('uploading');
-            var idx = knowledgeImageURLs.length;
-            knowledgeImageURLs.push(data.url);
+        var token = getAdminToken();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/images/upload', true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
 
-            // Add remove button
-            var removeBtn = document.createElement('button');
-            removeBtn.className = 'knowledge-image-remove';
-            removeBtn.textContent = '×';
-            removeBtn.setAttribute('aria-label', '删除图片');
-            removeBtn.onclick = function () {
-                knowledgeImageURLs[idx] = null;
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable && progressBar) {
+                setProgressBar(progressBar, (e.loaded / e.total) * 90);
+            }
+        };
+
+        xhr.onload = function () {
+            if (progressBar) setProgressBar(progressBar, 100);
+            setTimeout(function () { removeProgressOverlay(item); }, 300);
+            item.classList.remove('uploading');
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                var data;
+                try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+                var idx = knowledgeImageURLs.length;
+                knowledgeImageURLs.push(data.url);
+
+                // Add remove button
+                var removeBtn = document.createElement('button');
+                removeBtn.className = 'knowledge-image-remove';
+                removeBtn.textContent = '×';
+                removeBtn.setAttribute('aria-label', '删除图片');
+                removeBtn.onclick = function () {
+                    knowledgeImageURLs[idx] = null;
+                    item.remove();
+                };
+                item.appendChild(removeBtn);
+            } else {
                 item.remove();
-            };
-            item.appendChild(removeBtn);
-        })
-        .catch(function (err) {
+                showAdminToast('图片上传失败', 'error');
+            }
+        };
+
+        xhr.onerror = function () {
             item.remove();
-            showAdminToast(err.message || '图片上传失败', 'error');
-        });
+            showAdminToast('图片上传失败', 'error');
+        };
+
+        xhr.send(formData);
     }
 
     window.submitKnowledgeEntry = function () {
@@ -1560,6 +1785,13 @@
         var btn = document.getElementById('knowledge-submit-btn');
         if (btn) btn.disabled = true;
         showAdminToast('正在录入知识...', 'info');
+
+        // Show indeterminate progress on knowledge image zone if images present
+        var imgZone = document.getElementById('knowledge-image-zone');
+        if (imageURLs.length > 0 && imgZone) {
+            addProgressOverlay(imgZone, true, 'knowledge-submit-progress');
+            imgZone.style.position = 'relative';
+        }
 
         adminFetch('/api/knowledge', {
             method: 'POST',
@@ -1583,6 +1815,7 @@
         })
         .finally(function () {
             if (btn) btn.disabled = false;
+            if (imgZone) removeProgressOverlay(imgZone, 'knowledge-submit-progress');
         });
     };
 
