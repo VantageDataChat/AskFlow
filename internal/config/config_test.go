@@ -286,3 +286,108 @@ func TestEncryptDecrypt_EmptyString(t *testing.T) {
 		t.Errorf("decryptIfNeeded empty = %q, want empty", decrypted)
 	}
 }
+
+func TestVideoConfig_DefaultValues(t *testing.T) {
+	cm, _ := newTestManager(t)
+	if err := cm.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	cfg := cm.Get()
+	if cfg.Video.KeyframeInterval != 10 {
+		t.Errorf("Video.KeyframeInterval = %d, want 10", cfg.Video.KeyframeInterval)
+	}
+	if cfg.Video.WhisperModel != "base" {
+		t.Errorf("Video.WhisperModel = %q, want \"base\"", cfg.Video.WhisperModel)
+	}
+	if cfg.Video.FFmpegPath != "" {
+		t.Errorf("Video.FFmpegPath = %q, want empty", cfg.Video.FFmpegPath)
+	}
+	if cfg.Video.WhisperPath != "" {
+		t.Errorf("Video.WhisperPath = %q, want empty", cfg.Video.WhisperPath)
+	}
+}
+
+func TestVideoConfig_UpdateAndPersist(t *testing.T) {
+	cm, path := newTestManager(t)
+	if err := cm.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	updates := map[string]interface{}{
+		"video.ffmpeg_path":       "/usr/bin/ffmpeg",
+		"video.whisper_path":      "/usr/bin/whisper",
+		"video.keyframe_interval": 5,
+		"video.whisper_model":     "medium",
+	}
+	if err := cm.Update(updates); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	cfg := cm.Get()
+	if cfg.Video.FFmpegPath != "/usr/bin/ffmpeg" {
+		t.Errorf("Video.FFmpegPath = %q, want /usr/bin/ffmpeg", cfg.Video.FFmpegPath)
+	}
+	if cfg.Video.WhisperPath != "/usr/bin/whisper" {
+		t.Errorf("Video.WhisperPath = %q, want /usr/bin/whisper", cfg.Video.WhisperPath)
+	}
+	if cfg.Video.KeyframeInterval != 5 {
+		t.Errorf("Video.KeyframeInterval = %d, want 5", cfg.Video.KeyframeInterval)
+	}
+	if cfg.Video.WhisperModel != "medium" {
+		t.Errorf("Video.WhisperModel = %q, want medium", cfg.Video.WhisperModel)
+	}
+
+	// Verify persisted
+	cm2, err := NewConfigManagerWithKey(path, testKey())
+	if err != nil {
+		t.Fatalf("NewConfigManagerWithKey: %v", err)
+	}
+	if err := cm2.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	cfg2 := cm2.Get()
+	if cfg2.Video.FFmpegPath != "/usr/bin/ffmpeg" {
+		t.Errorf("persisted Video.FFmpegPath = %q", cfg2.Video.FFmpegPath)
+	}
+	if cfg2.Video.WhisperPath != "/usr/bin/whisper" {
+		t.Errorf("persisted Video.WhisperPath = %q", cfg2.Video.WhisperPath)
+	}
+	if cfg2.Video.KeyframeInterval != 5 {
+		t.Errorf("persisted Video.KeyframeInterval = %d", cfg2.Video.KeyframeInterval)
+	}
+	if cfg2.Video.WhisperModel != "medium" {
+		t.Errorf("persisted Video.WhisperModel = %q", cfg2.Video.WhisperModel)
+	}
+}
+
+func TestVideoConfig_ApplyDefaultsOnLoad(t *testing.T) {
+	// Write a config file with video section but missing defaults
+	path := tempConfigPath(t)
+	raw := map[string]interface{}{
+		"video": map[string]interface{}{
+			"ffmpeg_path": "/usr/bin/ffmpeg",
+		},
+	}
+	data, _ := json.Marshal(raw)
+	os.WriteFile(path, data, 0600)
+
+	cm, err := NewConfigManagerWithKey(path, testKey())
+	if err != nil {
+		t.Fatalf("NewConfigManagerWithKey: %v", err)
+	}
+	if err := cm.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	cfg := cm.Get()
+	if cfg.Video.FFmpegPath != "/usr/bin/ffmpeg" {
+		t.Errorf("Video.FFmpegPath = %q, want /usr/bin/ffmpeg", cfg.Video.FFmpegPath)
+	}
+	if cfg.Video.KeyframeInterval != 10 {
+		t.Errorf("Video.KeyframeInterval = %d, want 10 (default)", cfg.Video.KeyframeInterval)
+	}
+	if cfg.Video.WhisperModel != "base" {
+		t.Errorf("Video.WhisperModel = %q, want \"base\" (default)", cfg.Video.WhisperModel)
+	}
+}

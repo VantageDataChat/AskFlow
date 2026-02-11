@@ -1,4 +1,6 @@
-# Helpdesk
+# 问渠 AskFlow
+
+> 问渠那得清如许 —— 朱熹《观书有感》
 
 🇨🇳 中文 | [🇬🇧 English](./README_EN.md)
 
@@ -100,7 +102,7 @@ Go 单二进制部署，SQLite 存储，开箱即用。
 ## 项目结构
 
 ```
-helpdesk/
+askflow/
 ├── main.go                      # 入口：初始化、路由注册、HTTP 服务启动
 ├── app.go                       # API 门面：聚合所有服务组件
 ├── go.mod / go.sum              # Go 模块依赖
@@ -167,13 +169,13 @@ chmod +x build_local.sh
 ./build_local.sh
 
 # Windows
-go build -o helpdesk.exe .
+go build -o askflow.exe .
 ```
 
 ### 启动
 
 ```bash
-./helpdesk
+./askflow
 ```
 
 服务启动后监听 `0.0.0.0:8080`，浏览器访问 `http://localhost:8080`。
@@ -197,10 +199,10 @@ curl -X POST http://localhost:8080/api/documents/upload \
   -F "product_id=<product_id>"
 
 # 批量导入目录
-./helpdesk import ./docs
+./askflow import ./docs
 
 # 批量导入到指定产品
-./helpdesk import --product <product_id> ./docs ./manuals
+./askflow import --product <product_id> ./docs ./manuals
 ```
 
 ### 提问
@@ -307,9 +309,9 @@ curl -X POST http://localhost:8080/api/query \
 ## 命令行用法
 
 ```
-helpdesk                                              启动 HTTP 服务
-helpdesk import [--product <product_id>] <目录> [...]  批量导入文档到知识库
-helpdesk help                                         显示帮助信息
+askflow                                              启动 HTTP 服务
+askflow import [--product <product_id>] <目录> [...]  批量导入文档到知识库
+askflow help                                         显示帮助信息
 ```
 
 ### 批量导入
@@ -317,11 +319,11 @@ helpdesk help                                         显示帮助信息
 递归扫描指定目录，将支持的文件解析后存入向量数据库。
 
 ```bash
-helpdesk import ./docs
-helpdesk import ./docs ./manuals /path/to/files
+askflow import ./docs
+askflow import ./docs ./manuals /path/to/files
 
 # 指定目标产品（文档将关联到该产品）
-helpdesk import --product <product_id> ./docs
+askflow import --product <product_id> ./docs
 ```
 
 不指定 `--product` 时，文档将导入到公共库。若指定的产品 ID 不存在，系统将报错并中止导入。
@@ -492,10 +494,10 @@ helpdesk import --product <product_id> ./docs
 
 ```bash
 # 构建
-go build -o helpdesk .
+go build -o askflow .
 
 # 启动（可配合 systemd 管理进程）
-./helpdesk
+./askflow
 ```
 
 ### 远程部署（Windows → Linux）

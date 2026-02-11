@@ -1,8 +1,10 @@
-# Helpdesk
+# AskFlow 问渠
+
+> Ask, and clarity flows.
 
 [🇨🇳 中文](./README.md) | 🇬🇧 English
 
-An AI-powered helpdesk knowledge base system built on RAG (Retrieval-Augmented Generation). Upload product documents, and the system automatically retrieves relevant content and generates accurate answers via LLM when users ask questions.
+An AI-powered knowledge base system built on RAG (Retrieval-Augmented Generation). Upload product documents, and the system automatically retrieves relevant content and generates accurate answers via LLM when users ask questions.
 
 Single Go binary deployment, SQLite storage, ready out of the box.
 
@@ -101,7 +103,7 @@ Single Go binary deployment, SQLite storage, ready out of the box.
 ## Project Structure
 
 ```
-helpdesk/
+askflow/
 ├── main.go                      # Entry point: init, routing, HTTP server
 ├── app.go                       # API facade: aggregates all service components
 ├── go.mod / go.sum              # Go module dependencies
@@ -168,13 +170,13 @@ chmod +x build_local.sh
 ./build_local.sh
 
 # Windows
-go build -o helpdesk.exe .
+go build -o askflow.exe .
 ```
 
 ### Run
 
 ```bash
-./helpdesk
+./askflow
 ```
 
 The server listens on `0.0.0.0:8080`. Open `http://localhost:8080` in your browser.
@@ -198,10 +200,10 @@ curl -X POST http://localhost:8080/api/documents/upload \
   -F "product_id=<product_id>"
 
 # Batch import from directories
-./helpdesk import ./docs
+./askflow import ./docs
 
 # Batch import targeting a specific product
-./helpdesk import --product <product_id> ./docs ./manuals
+./askflow import --product <product_id> ./docs ./manuals
 ```
 
 ### Ask a Question
@@ -308,9 +310,9 @@ Supported providers: `google`, `apple`, `amazon`, `facebook`.
 ## CLI Usage
 
 ```
-helpdesk                                              Start HTTP server
-helpdesk import [--product <product_id>] <dir> [...]  Batch import documents into knowledge base
-helpdesk help                                         Show help information
+askflow                                              Start HTTP server
+askflow import [--product <product_id>] <dir> [...]  Batch import documents into knowledge base
+askflow help                                         Show help information
 ```
 
 ### Batch Import
@@ -318,11 +320,11 @@ helpdesk help                                         Show help information
 Recursively scans specified directories and imports supported files into the vector database.
 
 ```bash
-helpdesk import ./docs
-helpdesk import ./docs ./manuals /path/to/files
+askflow import ./docs
+askflow import ./docs ./manuals /path/to/files
 
 # Import into a specific product
-helpdesk import --product <product_id> ./docs
+askflow import --product <product_id> ./docs
 ```
 
 When `--product` is omitted, documents are imported into the Public Library. If the specified product ID does not exist, the system reports an error and aborts.
@@ -493,10 +495,10 @@ Content Dedup Check (SHA-256 hash against existing documents)
 
 ```bash
 # Build
-go build -o helpdesk .
+go build -o askflow .
 
 # Run (can be managed with systemd or similar)
-./helpdesk
+./askflow
 ```
 
 ### Remote Deploy (Windows → Linux)

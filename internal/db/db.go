@@ -135,6 +135,16 @@ func createTables(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS video_segments (
+			id           TEXT PRIMARY KEY,
+			document_id  TEXT NOT NULL,
+			segment_type TEXT NOT NULL,
+			start_time   REAL NOT NULL,
+			end_time     REAL NOT NULL,
+			content      TEXT NOT NULL,
+			chunk_id     TEXT NOT NULL,
+			FOREIGN KEY (document_id) REFERENCES documents(id)
+		)`,
 	}
 
 	tx, err := db.Begin()
@@ -226,6 +236,8 @@ func createIndexes(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_email_tokens_token ON email_tokens(token)`,
 		`CREATE INDEX IF NOT EXISTS idx_documents_product_id ON documents(product_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_chunks_product_id ON chunks(product_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_segments_chunk_id ON video_segments(chunk_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_video_segments_document_id ON video_segments(document_id)`,
 	}
 	for _, idx := range indexes {
 		if _, err := db.Exec(idx); err != nil {
@@ -272,6 +284,7 @@ func columnExists(db *sql.DB, table, column string) bool {
 		"pending_questions": true, "sessions": true,
 		"email_tokens": true, "admin_users": true,
 		"products": true, "admin_user_products": true,
+		"video_segments": true,
 	}
 	if !validTables[table] {
 		return false

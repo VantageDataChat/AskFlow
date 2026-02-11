@@ -35,6 +35,7 @@ type Config struct {
 	SMTP         SMTPConfig      `json:"smtp"`
 	ProductIntro string          `json:"product_intro"`
 	ProductName  string          `json:"product_name"`
+	Video        VideoConfig     `json:"video"`
 }
 
 
@@ -99,6 +100,14 @@ type OAuthProviderConfig struct {
 // OAuthConfig holds OAuth configuration for all providers.
 type OAuthConfig struct {
 	Providers map[string]OAuthProviderConfig `json:"providers"`
+}
+
+// VideoConfig holds video processing configuration.
+type VideoConfig struct {
+	FFmpegPath       string `json:"ffmpeg_path"`       // ffmpeg executable path, empty means video not supported
+	WhisperPath      string `json:"whisper_path"`      // whisper CLI executable path, empty means skip transcription
+	KeyframeInterval int    `json:"keyframe_interval"` // keyframe sampling interval in seconds, default 10
+	WhisperModel     string `json:"whisper_model"`     // whisper model name, default "base"
 }
 
 // AdminConfig holds admin authentication configuration.
@@ -183,6 +192,10 @@ func DefaultConfig() *Config {
 			Host:   "",
 			Port:   587,
 			UseTLS: true,
+		},
+		Video: VideoConfig{
+			KeyframeInterval: 10,
+			WhisperModel:     "base",
 		},
 	}
 }
@@ -529,6 +542,32 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 		}
 		cm.config.ProductName = s
 
+	// Video fields
+	case "video.ffmpeg_path":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.Video.FFmpegPath = s
+	case "video.whisper_path":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.Video.WhisperPath = s
+	case "video.keyframe_interval":
+		n, err := toInt(val)
+		if err != nil {
+			return err
+		}
+		cm.config.Video.KeyframeInterval = n
+	case "video.whisper_model":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.Video.WhisperModel = s
+
 	// Server fields
 	case "server.port":
 		n, err := toInt(val)
@@ -679,6 +718,12 @@ func (cm *ConfigManager) applyDefaults(cfg *Config) {
 	}
 	if cfg.SMTP.Port == 0 {
 		cfg.SMTP.Port = defaults.SMTP.Port
+	}
+	if cfg.Video.KeyframeInterval == 0 {
+		cfg.Video.KeyframeInterval = defaults.Video.KeyframeInterval
+	}
+	if cfg.Video.WhisperModel == "" {
+		cfg.Video.WhisperModel = defaults.Video.WhisperModel
 	}
 }
 
