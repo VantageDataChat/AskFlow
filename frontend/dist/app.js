@@ -1566,7 +1566,7 @@
     var adminProductsCache = null;
 
     function loadAdminProductSelectors() {
-        adminFetch('/api/products')
+        adminFetch('/api/products/my')
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 adminProductsCache = data.products || [];
