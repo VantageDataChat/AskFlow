@@ -5,6 +5,7 @@ package parser
 import (
 	"bytes"
 	"fmt"
+	"image/png"
 	"net/url"
 	"regexp"
 	"sort"
@@ -212,7 +213,9 @@ func (dp *DocumentParser) parseExcel(data []byte) (result *ParseResult, err erro
 	}, nil
 }
 
-// parsePPT extracts slide text from PowerPoint data using goppt, per page.
+// parsePPT extracts slide text and renders each slide as an image.
+// Uses GoPPT's SlideToImage to generate per-slide PNG images,
+// with the slide text as accompanying description.
 func (dp *DocumentParser) parsePPT(data []byte) (result *ParseResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -226,8 +229,13 @@ func (dp *DocumentParser) parsePPT(data []byte) (result *ParseResult, err error)
 		return nil, fmt.Errorf("ppt解析错误: %w", err)
 	}
 
-	var sb strings.Builder
 	slides := pres.Slides()
+	var sb strings.Builder
+	var images []ImageRef
+
+	opts := goppt.DefaultRenderOptions()
+	opts.Width = 1280
+
 	for i, slide := range slides {
 		text := slide.ExtractText()
 		if text != "" {
@@ -236,6 +244,33 @@ func (dp *DocumentParser) parsePPT(data []byte) (result *ParseResult, err error)
 			}
 			sb.WriteString(fmt.Sprintf("Slide %d:\n%s", i+1, text))
 		}
+
+		// Render slide to image
+		img, renderErr := pres.SlideToImage(i, opts)
+		if renderErr != nil {
+			fmt.Printf("Warning: PPT第%d页渲染失败: %v\n", i+1, renderErr)
+			continue
+		}
+
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			fmt.Printf("Warning: PPT第%d页PNG编码失败: %v\n", i+1, err)
+			continue
+		}
+
+		alt := fmt.Sprintf("PPT第%d页", i+1)
+		if text != "" {
+			t := strings.TrimSpace(text)
+			if len(t) > 200 {
+				t = t[:200] + "..."
+			}
+			alt = fmt.Sprintf("PPT第%d页: %s", i+1, t)
+		}
+
+		images = append(images, ImageRef{
+			Alt:  alt,
+			Data: buf.Bytes(),
+		})
 	}
 
 	return &ParseResult{
@@ -243,7 +278,9 @@ func (dp *DocumentParser) parsePPT(data []byte) (result *ParseResult, err error)
 		Metadata: map[string]string{
 			"type":        "ppt",
 			"slide_count": fmt.Sprintf("%d", len(slides)),
+			"image_count": fmt.Sprintf("%d", len(images)),
 		},
+		Images: images,
 	}, nil
 }
 

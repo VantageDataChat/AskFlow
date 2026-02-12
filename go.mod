@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/VantageDataChat/GoExcel v0.0.0-20260210221956-22a34d8dea7f
 	github.com/VantageDataChat/GoPDF2 v0.0.0-20260212143022-4f8ad48dca6e
-	github.com/VantageDataChat/GoPPT v0.0.0-20260210220934-e91ef3c4e651
+	github.com/VantageDataChat/GoPPT v0.0.0-20260212151250-d085dbf0c4cf
 	github.com/VantageDataChat/GoWord v0.0.0-20260210220908-40c2b82002d1
 	github.com/mattn/go-sqlite3 v1.14.34
 	github.com/nicexipi/sqlite-vec v0.0.0
