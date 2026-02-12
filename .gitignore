@@ -2,6 +2,8 @@
 deploy.tar.gz
 *.exe
 helpdesk
+build/dist/
+build/installer/helpdesk-installer.exe
 
 # Upload data (test/runtime files)
 data/uploads/
@@ -16,3 +18,6 @@ internal/document/data/uploads/
 
 # Kiro
 .kiro/
+
+# Server credentials (sensitive information)
+server.md

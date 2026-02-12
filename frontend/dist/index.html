@@ -259,6 +259,10 @@
                         </button>
                     </nav>
                     <div class="admin-sidebar-footer">
+                        <div class="admin-user-info">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <span id="admin-username-display" class="admin-username">--</span>
+                        </div>
                         <button class="lang-switch-btn" style="margin-bottom:8px;width:100%;" onclick="i18n.toggleLang(); i18n.applyI18nToPage();">EN</button>
                         <button class="admin-logout-btn" onclick="adminLogout()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -613,6 +617,18 @@
                                             <div id="knowledge-image-preview" class="knowledge-image-preview"></div>
                                         </div>
                                     </div>
+                                    <div class="admin-form-row">
+                                        <label data-i18n="admin_knowledge_video_label">视频（可选）</label>
+                                        <div id="knowledge-video-zone" class="knowledge-video-zone">
+                                            <div class="knowledge-video-upload-area" id="knowledge-video-upload-area">
+                                                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                                                <p data-i18n="admin_knowledge_video_upload">点击上传视频、拖拽视频到此处，或从剪贴板粘贴</p>
+                                                <span class="admin-drop-hint" data-i18n="admin_knowledge_video_hint">支持 MP4、AVI、MKV、MOV、WebM 格式</span>
+                                                <input type="file" id="knowledge-video-input" accept="video/mp4,video/avi,video/x-msvideo,video/x-matroska,video/quicktime,video/webm" multiple style="display:none">
+                                            </div>
+                                            <div id="knowledge-video-preview" class="knowledge-video-preview"></div>
+                                        </div>
+                                    </div>
                                 </fieldset>
                                 <div class="admin-form-actions">
                                     <button class="btn-primary" id="knowledge-submit-btn" onclick="submitKnowledgeEntry()" data-i18n="admin_knowledge_submit">提交录入</button>
@@ -684,9 +700,9 @@
                                             <span class="admin-dep-label" id="dep-ffmpeg-label" data-i18n="admin_multimodal_checking">检测中...</span>
                                         </div>
                                         <div class="admin-dep-item">
-                                            <span class="admin-dep-icon" id="dep-sensevoice-icon">⏳</span>
-                                            <span>SenseVoice</span>
-                                            <span class="admin-dep-label" id="dep-sensevoice-label" data-i18n="admin_multimodal_checking">检测中...</span>
+                                            <span class="admin-dep-icon" id="dep-rapidspeech-icon">⏳</span>
+                                            <span>RapidSpeech</span>
+                                            <span class="admin-dep-label" id="dep-rapidspeech-label" data-i18n="admin_multimodal_checking">检测中...</span>
                                         </div>
                                     </div>
                                     <div class="admin-form-row" style="margin-top:0.5rem;">
@@ -709,12 +725,12 @@
                                                 <div class="admin-install-os">
                                                     <h4>Windows</h4>
                                                     <ol>
-                                                        <li data-i18n="admin_multimodal_ffmpeg_win1">访问 <a href="https://www.gyan.dev/ffmpeg/builds/" target="_blank" rel="noopener">gyan.dev/ffmpeg</a> 下载 release full 版本</li>
-                                                        <li data-i18n="admin_multimodal_ffmpeg_win2">解压到任意目录，如 <code>C:\ffmpeg</code></li>
-                                                        <li data-i18n="admin_multimodal_ffmpeg_win3">将 <code>C:\ffmpeg\bin</code> 添加到系统环境变量 PATH 中</li>
-                                                        <li data-i18n="admin_multimodal_ffmpeg_win4">或直接在上方填写完整路径：<code>C:\ffmpeg\bin\ffmpeg.exe</code></li>
+                                                        <li data-i18n-html="admin_multimodal_ffmpeg_win1">访问 <a href="https://www.gyan.dev/ffmpeg/builds/" target="_blank" rel="noopener">gyan.dev/ffmpeg</a> 下载 release full 版本</li>
+                                                        <li data-i18n-html="admin_multimodal_ffmpeg_win2">解压到任意目录，如 <code>C:\ffmpeg</code></li>
+                                                        <li data-i18n-html="admin_multimodal_ffmpeg_win3">将 <code>C:\ffmpeg\bin</code> 添加到系统环境变量 PATH 中</li>
+                                                        <li data-i18n-html="admin_multimodal_ffmpeg_win4">或直接在上方填写完整路径：<code>C:\ffmpeg\bin\ffmpeg.exe</code></li>
                                                     </ol>
-                                                    <p data-i18n="admin_multimodal_ffmpeg_win_alt">也可使用包管理器：<code>winget install ffmpeg</code> 或 <code>choco install ffmpeg</code></p>
+                                                    <p data-i18n-html="admin_multimodal_ffmpeg_win_alt">也可使用包管理器：<code>winget install ffmpeg</code> 或 <code>choco install ffmpeg</code></p>
                                                 </div>
                                                 <div class="admin-install-os">
                                                     <h4>macOS</h4>
@@ -728,49 +744,49 @@
                                                     <h4>Linux (CentOS/RHEL)</h4>
                                                     <code class="admin-install-cmd">sudo yum install ffmpeg</code>
                                                 </div>
-                                                <p data-i18n="admin_multimodal_ffmpeg_verify">安装后可在终端运行 <code>ffmpeg -version</code> 验证是否安装成功。</p>
+                                                <p data-i18n-html="admin_multimodal_ffmpeg_verify">安装后可在终端运行 <code>ffmpeg -version</code> 验证是否安装成功。</p>
                                             </div>
                                         </details>
                                     </div>
                                 </fieldset>
 
                                 <fieldset class="admin-fieldset">
-                                    <legend data-i18n="admin_multimodal_sensevoice">SenseVoice 配置</legend>
+                                    <legend data-i18n="admin_multimodal_rapidspeech">RapidSpeech 配置</legend>
                                     <div class="admin-form-row">
-                                        <label data-i18n="admin_multimodal_sensevoice_path">SenseVoice 可执行文件路径</label>
-                                        <input type="text" id="cfg-video-sensevoice-path" placeholder="/usr/local/bin/sense-voice-cpp">
-                                        <span class="admin-form-hint" data-i18n="admin_multimodal_sensevoice_path_hint">填写 sense-voice-cpp 的完整路径</span>
+                                        <label data-i18n="admin_multimodal_rapidspeech_path">RapidSpeech 可执行文件路径</label>
+                                        <input type="text" id="cfg-video-rapidspeech-path" placeholder="/usr/local/bin/rs-asr-offline">
+                                        <span class="admin-form-hint" data-i18n="admin_multimodal_rapidspeech_path_hint">填写 rs-asr-offline 的完整路径</span>
                                     </div>
                                     <div class="admin-form-row">
-                                        <label data-i18n="admin_multimodal_sensevoice_model">SenseVoice 模型文件路径</label>
-                                        <input type="text" id="cfg-video-sensevoice-model" placeholder="/path/to/model.bin">
-                                        <span class="admin-form-hint" data-i18n="admin_multimodal_sensevoice_model_hint">填写模型文件（model.bin）的完整路径</span>
+                                        <label data-i18n="admin_multimodal_rapidspeech_model">RapidSpeech 模型文件路径</label>
+                                        <input type="text" id="cfg-video-rapidspeech-model" placeholder="/path/to/model.gguf">
+                                        <span class="admin-form-hint" data-i18n="admin_multimodal_rapidspeech_model_hint">填写模型文件（model.gguf）的完整路径</span>
                                     </div>
                                     <div class="admin-install-guide">
                                         <details>
-                                            <summary data-i18n="admin_multimodal_sensevoice_install">📦 SenseVoice.cpp 安装指南</summary>
+                                            <summary data-i18n="admin_multimodal_rapidspeech_install">📦 RapidSpeech.cpp 安装指南</summary>
                                             <div class="admin-install-content">
-                                                <p data-i18n="admin_multimodal_sensevoice_desc">SenseVoice.cpp 是轻量级的 C++ 语音识别工具，无需 Python 环境，易于部署。</p>
+                                                <p data-i18n="admin_multimodal_rapidspeech_desc">RapidSpeech.cpp 是基于 ggml 的 C++ 语音识别框架</p>
                                                 <div class="admin-install-os">
-                                                    <h4 data-i18n="admin_multimodal_sensevoice_step1_title">步骤 1：下载预编译程序</h4>
-                                                    <p data-i18n="admin_multimodal_sensevoice_step1_desc">从 GitHub Releases 下载适合您系统的预编译版本</p>
-                                                    <p data-i18n="admin_multimodal_sensevoice_step1_alt">或使用源码编译</p>
+                                                    <h4 data-i18n="admin_multimodal_rapidspeech_step1_title">步骤 1：编译程序</h4>
+                                                    <p data-i18n-html="admin_multimodal_rapidspeech_step1_desc">克隆仓库并编译</p>
+                                                    <p data-i18n-html="admin_multimodal_rapidspeech_step1_note">编译后可执行文件位于 build/rs-asr-offline</p>
                                                 </div>
                                                 <div class="admin-install-os">
-                                                    <h4 data-i18n="admin_multimodal_sensevoice_step2_title">步骤 2：下载模型文件</h4>
-                                                    <p data-i18n="admin_multimodal_sensevoice_step2_desc">从项目的模型下载页面获取 model.bin 文件</p>
-                                                    <p data-i18n="admin_multimodal_sensevoice_step2_note">推荐使用 small 模型</p>
+                                                    <h4 data-i18n="admin_multimodal_rapidspeech_step2_title">步骤 2：下载模型文件</h4>
+                                                    <p data-i18n-html="admin_multimodal_rapidspeech_step2_desc">从 Hugging Face 或 ModelScope 下载 GGUF 格式模型文件</p>
+                                                    <p data-i18n="admin_multimodal_rapidspeech_step2_note">支持多种量化版本，推荐 Q5</p>
                                                 </div>
                                                 <div class="admin-install-os">
-                                                    <h4 data-i18n="admin_multimodal_sensevoice_step3_title">步骤 3：配置路径</h4>
-                                                    <p data-i18n="admin_multimodal_sensevoice_step3_desc">在上方填写可执行文件和模型文件的完整路径即可</p>
+                                                    <h4 data-i18n="admin_multimodal_rapidspeech_step3_title">步骤 3：配置路径</h4>
+                                                    <p data-i18n="admin_multimodal_rapidspeech_step3_desc">在上方填写可执行文件和模型文件的完整路径即可</p>
                                                 </div>
                                                 <div class="admin-install-os">
-                                                    <h4 data-i18n="admin_multimodal_sensevoice_note_title">⚠️ 注意事项</h4>
+                                                    <h4 data-i18n="admin_multimodal_rapidspeech_note_title">⚠️ 注意事项</h4>
                                                     <ul>
-                                                        <li data-i18n="admin_multimodal_sensevoice_note1">SenseVoice 依赖 FFmpeg 提取音频</li>
-                                                        <li data-i18n="admin_multimodal_sensevoice_note2">C++ 实现，无需 GPU 也能快速运行</li>
-                                                        <li data-i18n="admin_multimodal_sensevoice_note3">命令行驱动，部署简单</li>
+                                                        <li data-i18n="admin_multimodal_rapidspeech_note1">RapidSpeech 依赖 FFmpeg 提取音频</li>
+                                                        <li data-i18n="admin_multimodal_rapidspeech_note2">C++ 实现，支持 CPU/GPU/NPU 加速</li>
+                                                        <li data-i18n="admin_multimodal_rapidspeech_note3">单一二进制文件，零依赖</li>
                                                     </ul>
                                                 </div>
                                             </div>
@@ -784,6 +800,11 @@
                                         <label data-i18n="admin_multimodal_keyframe_interval">关键帧抽取间隔（秒）</label>
                                         <input type="number" id="cfg-video-keyframe-interval" min="1" max="300" placeholder="10">
                                         <span class="admin-form-hint" data-i18n="admin_multimodal_keyframe_hint">每隔多少秒从视频中提取一帧图像用于图像检索，默认 10 秒</span>
+                                    </div>
+                                    <div class="admin-form-row">
+                                        <label data-i18n="admin_multimodal_max_upload_size">文件上传大小限制（MB）</label>
+                                        <input type="number" id="cfg-video-max-upload-size" min="1" max="10240" placeholder="500">
+                                        <span class="admin-form-hint" data-i18n="admin_multimodal_max_upload_hint">视频和文档上传的最大文件大小，默认 500MB</span>
                                     </div>
                                 </fieldset>
 

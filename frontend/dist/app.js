@@ -15,6 +15,7 @@
     var registerCaptchaId = '';
     var adminCaptchaId = '';
     var urlProductName = ''; // product name from URL query string, e.g. ?askflow
+    var maxUploadSizeMB = 500; // default, will be fetched from server
 
     // Parse URL query string for product name: ?productName (bare key, no value)
     (function () {
@@ -560,7 +561,7 @@
             })
             .then(function (data) {
                 if (data.session) {
-                    saveAdminSession(data.session, { name: username, provider: 'admin' });
+                    saveAdminSession(data.session, { username: username, provider: 'admin' });
                     if (data.role) localStorage.setItem('admin_role', data.role);
                     navigate('/admin-panel');
                 } else {
@@ -619,7 +620,7 @@
             })
             .then(function (data) {
                 if (data.session) {
-                    saveAdminSession(data.session, { name: username, provider: 'admin' });
+                    saveAdminSession(data.session, { username: username, provider: 'admin' });
                     if (data.role) localStorage.setItem('admin_role', data.role);
                     navigate('/admin-panel');
                 } else {
@@ -1467,8 +1468,16 @@
     };
 
     function initAdmin() {
+        // Display current admin username
+        var adminUser = getAdminUser();
+        var usernameDisplay = document.getElementById('admin-username-display');
+        if (usernameDisplay && adminUser && adminUser.username) {
+            usernameDisplay.textContent = adminUser.username;
+        }
+
         setupDropZone();
         initKnowledgeImageZone();
+        initKnowledgeVideoZone();
         // Fetch role and apply visibility
         adminFetch('/api/admin/role')
             .then(function (res) { return res.json(); })
@@ -2473,9 +2482,10 @@
             .then(function (cfg) {
                 var video = cfg.video || {};
                 setVal('cfg-video-ffmpeg-path', video.ffmpeg_path || '');
-                setVal('cfg-video-sensevoice-path', video.sensevoice_path || '');
+                setVal('cfg-video-rapidspeech-path', video.rapidspeech_path || '');
                 setVal('cfg-video-keyframe-interval', video.keyframe_interval || 10);
-                setVal('cfg-video-sensevoice-model', video.sensevoice_model || '');
+                setVal('cfg-video-rapidspeech-model', video.rapidspeech_model || '');
+                setVal('cfg-video-max-upload-size', video.max_upload_size_mb || 500);
                 checkMultimodalDeps();
             })
             .catch(function () {
@@ -2486,12 +2496,12 @@
     window.checkMultimodalDeps = function () {
         var ffmpegIcon = document.getElementById('dep-ffmpeg-icon');
         var ffmpegLabel = document.getElementById('dep-ffmpeg-label');
-        var sensevoiceIcon = document.getElementById('dep-sensevoice-icon');
-        var sensevoiceLabel = document.getElementById('dep-sensevoice-label');
+        var rapidspeechIcon = document.getElementById('dep-rapidspeech-icon');
+        var rapidspeechLabel = document.getElementById('dep-rapidspeech-label');
         if (ffmpegIcon) ffmpegIcon.textContent = '⏳';
         if (ffmpegLabel) ffmpegLabel.textContent = i18n.t('admin_multimodal_checking');
-        if (sensevoiceIcon) sensevoiceIcon.textContent = '⏳';
-        if (sensevoiceLabel) sensevoiceLabel.textContent = i18n.t('admin_multimodal_checking');
+        if (rapidspeechIcon) rapidspeechIcon.textContent = '⏳';
+        if (rapidspeechLabel) rapidspeechLabel.textContent = i18n.t('admin_multimodal_checking');
 
         adminFetch('/api/video/check-deps')
             .then(function (res) { return res.json(); })
@@ -2499,29 +2509,31 @@
                 if (ffmpegIcon) ffmpegIcon.textContent = data.ffmpeg_ok ? '✅' : '❌';
                 if (ffmpegLabel) ffmpegLabel.textContent = data.ffmpeg_ok ? i18n.t('admin_multimodal_available') : i18n.t('admin_multimodal_not_found');
                 if (ffmpegLabel) ffmpegLabel.style.color = data.ffmpeg_ok ? '#38a169' : '#e53e3e';
-                if (sensevoiceIcon) sensevoiceIcon.textContent = data.sensevoice_ok ? '✅' : '❌';
-                if (sensevoiceLabel) sensevoiceLabel.textContent = data.sensevoice_ok ? i18n.t('admin_multimodal_available') : i18n.t('admin_multimodal_not_found');
-                if (sensevoiceLabel) sensevoiceLabel.style.color = data.sensevoice_ok ? '#38a169' : '#e53e3e';
+                if (rapidspeechIcon) rapidspeechIcon.textContent = data.rapidspeech_ok ? '✅' : '❌';
+                if (rapidspeechLabel) rapidspeechLabel.textContent = data.rapidspeech_ok ? i18n.t('admin_multimodal_available') : i18n.t('admin_multimodal_not_found');
+                if (rapidspeechLabel) rapidspeechLabel.style.color = data.rapidspeech_ok ? '#38a169' : '#e53e3e';
             })
             .catch(function () {
                 if (ffmpegIcon) ffmpegIcon.textContent = '❓';
                 if (ffmpegLabel) ffmpegLabel.textContent = i18n.t('admin_multimodal_check_failed');
-                if (sensevoiceIcon) sensevoiceIcon.textContent = '❓';
-                if (sensevoiceLabel) sensevoiceLabel.textContent = i18n.t('admin_multimodal_check_failed');
+                if (rapidspeechIcon) rapidspeechIcon.textContent = '❓';
+                if (rapidspeechLabel) rapidspeechLabel.textContent = i18n.t('admin_multimodal_check_failed');
             });
     };
 
     window.saveMultimodalSettings = function () {
         var updates = {};
         var ffmpegPath = getVal('cfg-video-ffmpeg-path');
-        var sensevoicePath = getVal('cfg-video-sensevoice-path');
+        var rapidspeechPath = getVal('cfg-video-rapidspeech-path');
         var keyframeInterval = getVal('cfg-video-keyframe-interval');
-        var sensevoiceModel = getVal('cfg-video-sensevoice-model');
+        var rapidspeechModel = getVal('cfg-video-rapidspeech-model');
+        var maxUploadSize = getVal('cfg-video-max-upload-size');
 
         updates['video.ffmpeg_path'] = ffmpegPath;
-        updates['video.sensevoice_path'] = sensevoicePath;
+        updates['video.rapidspeech_path'] = rapidspeechPath;
         if (keyframeInterval !== '') updates['video.keyframe_interval'] = parseInt(keyframeInterval, 10);
-        if (sensevoiceModel) updates['video.sensevoice_model'] = sensevoiceModel;
+        if (rapidspeechModel) updates['video.rapidspeech_model'] = rapidspeechModel;
+        if (maxUploadSize !== '') updates['video.max_upload_size_mb'] = parseInt(maxUploadSize, 10);
 
         adminFetch('/api/config', {
             method: 'PUT',
@@ -2763,6 +2775,7 @@
     // --- Knowledge Entry ---
 
     var knowledgeImageURLs = [];
+    var knowledgeVideoURLs = [];
 
     function initKnowledgeImageZone() {
         var area = document.getElementById('knowledge-image-upload-area');
@@ -2891,6 +2904,136 @@
         xhr.send(formData);
     }
 
+    function initKnowledgeVideoZone() {
+        var area = document.getElementById('knowledge-video-upload-area');
+        var input = document.getElementById('knowledge-video-input');
+        if (!area || !input) return;
+
+        // Click to select files
+        area.addEventListener('click', function () {
+            input.click();
+        });
+
+        // File input change
+        input.addEventListener('change', function () {
+            if (input.files && input.files.length > 0) {
+                for (var i = 0; i < input.files.length; i++) {
+                    uploadKnowledgeVideo(input.files[i]);
+                }
+                input.value = '';
+            }
+        });
+
+        // Drag and drop
+        area.addEventListener('dragover', function (e) {
+            e.preventDefault();
+            area.classList.add('dragover');
+        });
+        area.addEventListener('dragleave', function () {
+            area.classList.remove('dragover');
+        });
+        area.addEventListener('drop', function (e) {
+            e.preventDefault();
+            area.classList.remove('dragover');
+            var files = e.dataTransfer.files;
+            for (var i = 0; i < files.length; i++) {
+                if (files[i].type.indexOf('video/') === 0) {
+                    uploadKnowledgeVideo(files[i]);
+                }
+            }
+        });
+
+        // Clipboard paste - listen on the whole knowledge tab
+        var knowledgeTab = document.getElementById('admin-tab-knowledge');
+        if (knowledgeTab) {
+            knowledgeTab.addEventListener('paste', function (e) {
+                var items = (e.clipboardData || e.originalEvent.clipboardData || {}).items;
+                if (!items) return;
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('video/') === 0) {
+                        e.preventDefault();
+                        var blob = items[i].getAsFile();
+                        if (blob) uploadKnowledgeVideo(blob);
+                    }
+                }
+            });
+        }
+    }
+
+    function uploadKnowledgeVideo(file) {
+        if (file.type.indexOf('video/') !== 0) {
+            showAdminToast(i18n.t('video_select_error'), 'error');
+            return;
+        }
+        if (file.size > maxUploadSizeMB * 1024 * 1024) {
+            showAdminToast(i18n.t('video_size_error', { size: maxUploadSizeMB }), 'error');
+            return;
+        }
+
+        // Create preview placeholder
+        var preview = document.getElementById('knowledge-video-preview');
+        var item = document.createElement('div');
+        item.className = 'knowledge-video-item uploading';
+
+        var video = document.createElement('video');
+        video.src = URL.createObjectURL(file);
+        video.controls = true;
+        video.muted = true;
+        item.appendChild(video);
+        preview.appendChild(item);
+
+        // Add progress bar overlay on this video item
+        var progressBar = addProgressOverlay(item, false);
+
+        var formData = new FormData();
+        formData.append('video', file, file.name || 'paste.mp4');
+
+        var token = getAdminToken();
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/videos/upload', true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable && progressBar) {
+                setProgressBar(progressBar, (e.loaded / e.total) * 90);
+            }
+        };
+
+        xhr.onload = function () {
+            if (progressBar) setProgressBar(progressBar, 100);
+            setTimeout(function () { removeProgressOverlay(item); }, 300);
+            item.classList.remove('uploading');
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                var data;
+                try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+                var idx = knowledgeVideoURLs.length;
+                knowledgeVideoURLs.push(data.url);
+
+                // Add remove button
+                var removeBtn = document.createElement('button');
+                removeBtn.className = 'knowledge-video-remove';
+                removeBtn.textContent = '×';
+                removeBtn.setAttribute('aria-label', i18n.t('video_remove_label'));
+                removeBtn.onclick = function () {
+                    knowledgeVideoURLs[idx] = null;
+                    item.remove();
+                };
+                item.appendChild(removeBtn);
+            } else {
+                item.remove();
+                showAdminToast(i18n.t('video_upload_failed'), 'error');
+            }
+        };
+
+        xhr.onerror = function () {
+            item.remove();
+            showAdminToast(i18n.t('video_upload_failed'), 'error');
+        };
+
+        xhr.send(formData);
+    }
+
     window.submitKnowledgeEntry = function () {
         var title = (document.getElementById('knowledge-title') || {}).value || '';
         var content = (document.getElementById('knowledge-content') || {}).value || '';
@@ -2901,6 +3044,7 @@
         }
 
         var imageURLs = knowledgeImageURLs.filter(function (u) { return u; });
+        var videoURLs = knowledgeVideoURLs.filter(function (u) { return u; });
 
         var btn = document.getElementById('knowledge-submit-btn');
         if (btn) btn.disabled = true;
@@ -2916,7 +3060,7 @@
         adminFetch('/api/knowledge', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: title.trim(), content: content.trim(), image_urls: imageURLs, product_id: getKnowledgeProductID() })
+            body: JSON.stringify({ title: title.trim(), content: content.trim(), image_urls: imageURLs, video_urls: videoURLs, product_id: getKnowledgeProductID() })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_knowledge_failed')); });
@@ -2929,6 +3073,9 @@
             var preview = document.getElementById('knowledge-image-preview');
             if (preview) preview.innerHTML = '';
             knowledgeImageURLs = [];
+            var videoPreview = document.getElementById('knowledge-video-preview');
+            if (videoPreview) videoPreview.innerHTML = '';
+            knowledgeVideoURLs = [];
         })
         .catch(function (err) {
             showAdminToast(err.message || i18n.t('admin_knowledge_failed'), 'error');
@@ -3210,6 +3357,9 @@
                 .then(function (data) {
                     if (data.oauth_providers) {
                         renderOAuthLoginButtons(data.oauth_providers);
+                    }
+                    if (data.max_upload_size_mb) {
+                        maxUploadSizeMB = data.max_upload_size_mb;
                     }
                 })
                 .catch(function () { /* ignore */ })

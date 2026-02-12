@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	mrand "math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -826,6 +828,7 @@ type KnowledgeEntryRequest struct {
 	Title     string   `json:"title"`
 	Content   string   `json:"content"`
 	ImageURLs []string `json:"image_urls,omitempty"`
+	VideoURLs []string `json:"video_urls,omitempty"`
 	ProductID string   `json:"product_id"`
 }
 
@@ -912,6 +915,38 @@ func (a *App) AddKnowledgeEntry(req KnowledgeEntryRequest) error {
 				if err := a.docManager.StoreChunks(docID, imgChunk); err != nil {
 					fmt.Printf("Warning: failed to store multimodal image vector %d: %v\n", i, err)
 				}
+			}
+		}
+	}
+
+	// Process video files - extract keyframes and transcripts using existing pipeline
+	if len(req.VideoURLs) > 0 {
+		for _, videoURL := range req.VideoURLs {
+			videoURL = strings.TrimSpace(videoURL)
+			if videoURL == "" {
+				continue
+			}
+
+			// Extract file path from URL (e.g., "/api/videos/knowledge/uuid.mp4" -> "./data/videos/knowledge/uuid.mp4")
+			videoPath := strings.TrimPrefix(videoURL, "/api/videos/knowledge/")
+			if videoPath == videoURL {
+				fmt.Printf("Warning: invalid video URL format: %s\n", videoURL)
+				continue
+			}
+			fullPath := filepath.Join(".", "data", "videos", "knowledge", videoPath)
+
+			// Read video file data
+			videoData, err := os.ReadFile(fullPath)
+			if err != nil {
+				fmt.Printf("Warning: failed to read video file %s: %v\n", fullPath, err)
+				continue
+			}
+
+			// Call processVideo to extract keyframes + transcripts
+			// This will create chunks associated with this knowledge entry docID
+			if err := a.docManager.ProcessVideoForKnowledge(docID, docName, videoData, videoURL, req.ProductID); err != nil {
+				fmt.Printf("Warning: failed to process video %s: %v\n", videoPath, err)
+				// Continue with other videos even if one fails
 			}
 		}
 	}

@@ -1,4 +1,4 @@
-// Package video provides video parsing functionality including SenseVoice transcript
+// Package video provides video parsing functionality including RapidSpeech transcript
 // parsing, keyframe management, and serialization utilities.
 package video
 
@@ -34,9 +34,9 @@ type ParseResult struct {
 	Duration   float64             // 视频总时长（秒）
 }
 
-// ParseSenseVoiceOutput 解析 SenseVoice 文本输出为 TranscriptSegment 列表
-// SenseVoice输出格式为纯文本，我们将整段文本作为一个segment
-func ParseSenseVoiceOutput(textData string) []TranscriptSegment {
+// ParseRapidSpeechOutput 解析 RapidSpeech 文本输出为 TranscriptSegment 列表
+// RapidSpeech输出格式为纯文本，我们将整段文本作为一个segment
+func ParseRapidSpeechOutput(textData string) []TranscriptSegment {
 	text := strings.TrimSpace(textData)
 	if text == "" {
 		return []TranscriptSegment{}
@@ -56,12 +56,12 @@ func SerializeTranscript(segments []TranscriptSegment) ([]byte, error) {
 	return json.Marshal(segments)
 }
 
-// Parser 视频解析器，封装 ffmpeg 和 SenseVoice 的调用逻辑
+// Parser 视频解析器，封装 ffmpeg 和 RapidSpeech 的调用逻辑
 type Parser struct {
-	FFmpegPath       string
-	SenseVoicePath   string
-	KeyframeInterval int
-	SenseVoiceModel  string
+	FFmpegPath        string
+	RapidSpeechPath   string
+	KeyframeInterval  int
+	RapidSpeechModel  string
 }
 
 // NewParser 根据 VideoConfig 创建 Parser 实例
@@ -72,26 +72,26 @@ func NewParser(cfg config.VideoConfig) *Parser {
 	}
 	return &Parser{
 		FFmpegPath:       cfg.FFmpegPath,
-		SenseVoicePath:   cfg.SenseVoicePath,
+		RapidSpeechPath:  cfg.RapidSpeechPath,
 		KeyframeInterval: interval,
-		SenseVoiceModel:  cfg.SenseVoiceModel,
+		RapidSpeechModel: cfg.RapidSpeechModel,
 	}
 }
 
-// CheckDependencies 检测 ffmpeg 和 SenseVoice 是否可用
-func (p *Parser) CheckDependencies() (ffmpegOK bool, senseVoiceOK bool) {
+// CheckDependencies 检测 ffmpeg 和 RapidSpeech 是否可用
+func (p *Parser) CheckDependencies() (ffmpegOK bool, rapidSpeechOK bool) {
 	if p.FFmpegPath != "" {
 		cmd := exec.Command(p.FFmpegPath, "-version")
 		if err := cmd.Run(); err == nil {
 			ffmpegOK = true
 		}
 	}
-	if p.SenseVoicePath != "" && p.SenseVoiceModel != "" {
-		// 检查 sense-voice 可执行文件是否存在
-		if _, err := os.Stat(p.SenseVoicePath); err == nil {
+	if p.RapidSpeechPath != "" && p.RapidSpeechModel != "" {
+		// 检查 rs-asr-offline 可执行文件是否存在
+		if _, err := os.Stat(p.RapidSpeechPath); err == nil {
 			// 检查模型文件是否存在
-			if _, err := os.Stat(p.SenseVoiceModel); err == nil {
-				senseVoiceOK = true
+			if _, err := os.Stat(p.RapidSpeechModel); err == nil {
+				rapidSpeechOK = true
 			}
 		}
 	}
@@ -118,20 +118,20 @@ func (p *Parser) ExtractAudio(videoPath, outputPath string) error {
 	return nil
 }
 
-// Transcribe 调用 SenseVoice CLI 对音频进行语音转录
+// Transcribe 调用 RapidSpeech CLI 对音频进行语音转录
 func (p *Parser) Transcribe(audioPath string) ([]TranscriptSegment, error) {
-	if p.SenseVoicePath == "" {
-		return nil, fmt.Errorf("SenseVoice 路径未配置")
+	if p.RapidSpeechPath == "" {
+		return nil, fmt.Errorf("RapidSpeech 路径未配置")
 	}
-	if p.SenseVoiceModel == "" {
-		return nil, fmt.Errorf("SenseVoice 模型路径未配置")
+	if p.RapidSpeechModel == "" {
+		return nil, fmt.Errorf("RapidSpeech 模型路径未配置")
 	}
 
-	// SenseVoice.cpp 命令行格式：
-	// sense-voice-cpp -m model.bin -f audio.wav
-	cmd := exec.Command(p.SenseVoicePath,
-		"-m", p.SenseVoiceModel,
-		"-f", audioPath,
+	// RapidSpeech.cpp 命令行格式：
+	// rs-asr-offline -m model.gguf -w audio.wav
+	cmd := exec.Command(p.RapidSpeechPath,
+		"-m", p.RapidSpeechModel,
+		"-w", audioPath,
 	)
 
 	// 捕获标准输出
@@ -141,7 +141,7 @@ func (p *Parser) Transcribe(audioPath string) ([]TranscriptSegment, error) {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			stderr = string(exitErr.Stderr)
 		}
-		return nil, fmt.Errorf("SenseVoice 转录失败: %s: %w", strings.TrimSpace(stderr), err)
+		return nil, fmt.Errorf("RapidSpeech 转录失败: %s: %w", strings.TrimSpace(stderr), err)
 	}
 
 	// 解析输出文本
@@ -213,8 +213,8 @@ func (p *Parser) Parse(videoPath string) (*ParseResult, error) {
 
 	result := &ParseResult{}
 
-	// 音频转录（仅当 SenseVoice 已配置时执行）
-	if p.SenseVoicePath != "" && p.SenseVoiceModel != "" {
+	// 音频转录（仅�� RapidSpeech 已配置时执行）
+	if p.RapidSpeechPath != "" && p.RapidSpeechModel != "" {
 		audioPath := filepath.Join(tempDir, "audio.wav")
 		audioErr := p.ExtractAudio(videoPath, audioPath)
 		if audioErr != nil {

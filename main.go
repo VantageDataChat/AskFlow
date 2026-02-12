@@ -14,89 +14,75 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
-	"helpdesk/internal/auth"
 	"helpdesk/internal/backup"
 	"helpdesk/internal/captcha"
-	"helpdesk/internal/chunker"
 	"helpdesk/internal/config"
-	"helpdesk/internal/db"
 	"helpdesk/internal/document"
 	"helpdesk/internal/email"
 	"helpdesk/internal/embedding"
 	"helpdesk/internal/llm"
-	"helpdesk/internal/parser"
 	"helpdesk/internal/pending"
 	"helpdesk/internal/product"
 	"helpdesk/internal/query"
-	"helpdesk/internal/vectorstore"
+	"helpdesk/internal/service"
+	helpdeskSvc "helpdesk/internal/svc"
 	"helpdesk/internal/video"
+
+	"golang.org/x/sys/windows/svc"
+)
+
+const (
+	serviceName = "HelpdeskService"
+	displayName = "Helpdesk Support Service"
+	description = "Vantage Helpdesk RAG Question Answering Service"
 )
 
 func main() {
-	// Ensure data directory exists
-	if err := os.MkdirAll("./data", 0755); err != nil {
-		log.Fatalf("Failed to create data directory: %v", err)
-	}
-
-	// 1. Initialize ConfigManager and load config
-	configPath := "./data/config.json"
-	cm, err := config.NewConfigManager(configPath)
+	// Check if running as Windows service
+	isService, err := svc.IsWindowsService()
 	if err != nil {
-		log.Fatalf("Failed to create config manager: %v", err)
-	}
-	if err := cm.Load(); err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-	cfg := cm.Get()
-
-	// 2. Initialize database
-	database, err := db.InitDB(cfg.Vector.DBPath)
-	if err != nil {
-		log.Fatalf("Failed to initialize database: %v", err)
-	}
-	defer database.Close()
-
-	// 3. Create service instances
-	vs := vectorstore.NewSQLiteVectorStore(database)
-	log.Printf("[SIMD] Vector acceleration: %s", vectorstore.SIMDCapability())
-	tc := &chunker.TextChunker{ChunkSize: cfg.Vector.ChunkSize, Overlap: cfg.Vector.Overlap}
-	dp := &parser.DocumentParser{}
-	es := embedding.NewAPIEmbeddingService(cfg.Embedding.Endpoint, cfg.Embedding.APIKey, cfg.Embedding.ModelName, cfg.Embedding.UseMultimodal)
-	ls := llm.NewAPILLMService(cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.ModelName, cfg.LLM.Temperature, cfg.LLM.MaxTokens)
-	dm := document.NewDocumentManager(dp, tc, es, vs, database)
-	dm.SetVideoConfig(cfg.Video)
-
-	// 视频依赖检测
-	if cfg.Video.FFmpegPath != "" || cfg.Video.SenseVoicePath != "" {
-		vp := video.NewParser(cfg.Video)
-		ffmpegOK, senseVoiceOK := vp.CheckDependencies()
-		statusStr := func(ok bool) string {
-			if ok {
-				return "可用"
-			}
-			return "不可用"
-		}
-		log.Printf("视频检索: ffmpeg=%s, sensevoice=%s", statusStr(ffmpegOK), statusStr(senseVoiceOK))
+		log.Fatalf("Failed to determine if running as service: %v", err)
 	}
 
-	ps := product.NewProductService(database)
+	// Parse datadir flag from command line
+	dataDir := parseDataDirFlag()
 
-	// Check for CLI subcommands
-	if len(os.Args) >= 2 {
+	// Handle command-line commands
+	if len(os.Args) >= 2 && !isService {
 		switch os.Args[1] {
+		// Windows service management commands
+		case "install":
+			handleInstall(os.Args[2:])
+			return
+		case "remove":
+			handleRemove()
+			return
+		case "start":
+			handleStart()
+			return
+		case "stop":
+			handleStop()
+			return
+
+		// Existing CLI commands
 		case "import":
-			runBatchImport(os.Args[2:], dm, ps)
+			runCLICommand(dataDir, func(appSvc *service.AppService) {
+				runBatchImport(os.Args[2:], appSvc.GetDocManager(), appSvc.GetProductService())
+			})
 			return
 		case "backup":
-			runBackup(os.Args[2:], database)
+			runCLICommand(dataDir, func(appSvc *service.AppService) {
+				runBackup(os.Args[2:], appSvc.GetDatabase())
+			})
 			return
 		case "restore":
 			runRestore(os.Args[2:])
 			return
 		case "products":
-			runListProducts(ps)
+			runCLICommand(dataDir, func(appSvc *service.AppService) {
+				runListProducts(appSvc.GetProductService())
+			})
 			return
 		case "help", "-h", "--help":
 			printUsage()
@@ -104,77 +90,176 @@ func main() {
 		}
 	}
 
-	qe := query.NewQueryEngine(es, vs, ls, database, cfg)
-	pm := pending.NewPendingQuestionManager(database, tc, es, vs, ls)
-	oc := auth.NewOAuthClient(cfg.OAuth.Providers)
-	sm := auth.NewSessionManager(database, 24*time.Hour)
+	// Run application
+	if isService {
+		runAsService(dataDir)
+	} else {
+		runAsConsoleApp(dataDir)
+	}
+}
 
-	// Create email service
-	emailSvc := email.NewService(func() config.SMTPConfig {
-		return cm.Get().SMTP
-	})
+// parseDataDirFlag extracts the --datadir flag from command line arguments.
+func parseDataDirFlag() string {
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, "--datadir=") {
+			return strings.TrimPrefix(arg, "--datadir=")
+		}
+		if arg == "--datadir" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return "./data"
+}
 
-	// 4. Create App
-	app := NewApp(database, qe, dm, pm, oc, sm, cm, emailSvc, ps)
+// handleInstall installs the Windows service.
+func handleInstall(args []string) {
+	dataDir := parseDataDirFlag()
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Fatalf("Failed to get executable path: %v", err)
+	}
 
-	// 5. Register HTTP API handlers
+	// Build service startup arguments
+	var serviceArgs []string
+	if dataDir != "./data" {
+		serviceArgs = append(serviceArgs, "--datadir="+dataDir)
+	}
+
+	err = helpdeskSvc.InstallService(serviceName, displayName, description, exePath, serviceArgs)
+	if err != nil {
+		log.Fatalf("Failed to install service: %v", err)
+	}
+
+	fmt.Println("✓ Service installed successfully")
+	if dataDir != "./data" {
+		fmt.Printf("  Data directory: %s\n", dataDir)
+	}
+	fmt.Println("\nTo start the service, run:")
+	fmt.Println("  helpdesk start")
+	fmt.Println("\nOr use Windows Services Manager (services.msc)")
+}
+
+// handleRemove uninstalls the Windows service.
+func handleRemove() {
+	err := helpdeskSvc.RemoveService(serviceName)
+	if err != nil {
+		log.Fatalf("Failed to remove service: %v", err)
+	}
+	fmt.Println("✓ Service removed successfully")
+}
+
+// handleStart starts the Windows service.
+func handleStart() {
+	err := helpdeskSvc.StartService(serviceName)
+	if err != nil {
+		log.Fatalf("Failed to start service: %v", err)
+	}
+	fmt.Println("✓ Service started successfully")
+}
+
+// handleStop stops the Windows service.
+func handleStop() {
+	err := helpdeskSvc.StopService(serviceName)
+	if err != nil {
+		log.Fatalf("Failed to stop service: %v", err)
+	}
+	fmt.Println("✓ Service stopped successfully")
+}
+
+// runAsService runs the application as a Windows service.
+func runAsService(dataDir string) {
+	// Initialize service logger
+	logger, err := helpdeskSvc.NewServiceLogger(serviceName, true, filepath.Join(dataDir, "logs"))
+	if err != nil {
+		log.Fatalf("Failed to create service logger: %v", err)
+	}
+	defer logger.Close()
+
+	// Initialize application service
+	appSvc := &service.AppService{}
+	if err := appSvc.Initialize(dataDir); err != nil {
+		logger.Error("Failed to initialize application: %v", err)
+		log.Fatalf("Failed to initialize application: %v", err)
+	}
+
+	// Create App and register handlers
+	app := createApp(appSvc)
 	registerAPIHandlers(app)
-
-	// 6. Serve frontend with SPA fallback (non-API routes serve index.html)
 	http.Handle("/", spaHandler("frontend/dist"))
 
-	// 7. Start HTTP server with graceful shutdown
-	addr := fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port)
-	server := &http.Server{
-		Addr:         addr,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	// Create Windows service handler
+	helpdeskService := helpdeskSvc.NewHelpdeskService(appSvc, logger)
+
+	// Run as Windows service
+	logger.Info("Starting Helpdesk service...")
+	if err := svc.Run(serviceName, helpdeskService); err != nil {
+		logger.Error("Service failed: %v", err)
+		log.Fatalf("Service failed: %v", err)
+	}
+}
+
+// runAsConsoleApp runs the application in console mode.
+func runAsConsoleApp(dataDir string) {
+	// Initialize application service
+	appSvc := &service.AppService{}
+	if err := appSvc.Initialize(dataDir); err != nil {
+		log.Fatalf("Failed to initialize application: %v", err)
 	}
 
-	// Start periodic session cleanup
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			if n, err := sm.CleanExpired(); err == nil && n > 0 {
-				log.Printf("Cleaned %d expired sessions", n)
-			}
-		}
-	}()
+	// Create App and register handlers
+	app := createApp(appSvc)
+	registerAPIHandlers(app)
+	http.Handle("/", spaHandler("frontend/dist"))
 
-	// Graceful shutdown on SIGINT/SIGTERM
-	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		sig := <-sigCh
-		log.Printf("Received signal %v, shutting down gracefully...", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := server.Shutdown(ctx); err != nil {
-			log.Printf("Graceful shutdown error: %v", err)
-		}
-	}()
+	// Run with graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
-	if cfg.Server.SSLCert != "" && cfg.Server.SSLKey != "" {
-		fmt.Printf("Helpdesk system starting on https://%s\n", addr)
-		if err := server.ListenAndServeTLS(cfg.Server.SSLCert, cfg.Server.SSLKey); err != http.ErrServerClosed {
-			log.Fatalf("HTTPS server error: %v", err)
-		}
-	} else {
-		fmt.Printf("Helpdesk system starting on http://%s\n", addr)
-		if err := server.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
-		}
+	fmt.Printf("Starting Helpdesk in console mode (data directory: %s)...\n", dataDir)
+	if err := appSvc.Run(ctx); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Server error: %v", err)
 	}
-	log.Println("Server stopped")
+}
+
+// runCLICommand initializes the app service and runs a CLI command.
+func runCLICommand(dataDir string, fn func(*service.AppService)) {
+	appSvc := &service.AppService{}
+	if err := appSvc.Initialize(dataDir); err != nil {
+		log.Fatalf("Failed to initialize application: %v", err)
+	}
+	defer appSvc.GetDatabase().Close()
+	fn(appSvc)
+}
+
+// createApp creates an App instance from AppService.
+func createApp(appSvc *service.AppService) *App {
+	return NewApp(
+		appSvc.GetDatabase(),
+		appSvc.GetQueryEngine(),
+		appSvc.GetDocManager(),
+		appSvc.GetPendingManager(),
+		appSvc.GetOAuthClient(),
+		appSvc.GetSessionManager(),
+		appSvc.GetConfigManager(),
+		appSvc.GetEmailService(),
+		appSvc.GetProductService(),
+	)
 }
 
 // printUsage prints CLI usage information.
 func printUsage() {
 	fmt.Println(`用法:
   helpdesk                                        启动 HTTP 服务（默认端口 8080）
-  helpdesk import [--product <product_id>] <目录> [...]  批量导入目录下的文档到知识库
+  helpdesk --datadir=<path>                        指定数据目录
+
+Windows 服务命令:
+  helpdesk install [--datadir=<path>]              安装为 Windows 服务
+  helpdesk remove                                  卸载 Windows 服务
+  helpdesk start                                   启动 Windows 服务
+  helpdesk stop                                    停止 Windows 服务
+
+CLI 命令:
+  helpdesk import [--product <product_id>] <目录> [...]  批量��入目录下的文档到知识库
   helpdesk products                                列出所有产品及产品 ID
   helpdesk backup [选项]                           备份整站数据
   helpdesk restore <备份文件>                       从备份恢复数据
@@ -572,8 +657,14 @@ func registerAPIHandlers(app *App) {
 	// Image upload for knowledge entry
 	http.HandleFunc("/api/images/upload", secureAPI(handleImageUpload(app)))
 
+	// Video upload for knowledge entry
+	http.HandleFunc("/api/videos/upload", secureAPI(handleKnowledgeVideoUpload(app)))
+
 	// Serve uploaded images
 	http.Handle("/api/images/", http.StripPrefix("/api/images/", http.FileServer(http.Dir("./data/images"))))
+
+	// Serve uploaded videos for knowledge entries
+	http.Handle("/api/videos/knowledge/", http.StripPrefix("/api/videos/knowledge/", http.FileServer(http.Dir("./data/videos/knowledge"))))
 
 	// Public media streaming endpoint for video/audio playback in chat
 	http.HandleFunc("/api/media/", secureAPI(handleMediaStream(app)))
@@ -873,8 +964,9 @@ func handleAppInfo(app *App) http.HandlerFunc {
 			providers = []string{}
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"product_name":    cfg.ProductName,
-			"oauth_providers": providers,
+			"product_name":        cfg.ProductName,
+			"oauth_providers":     providers,
+			"max_upload_size_mb":  cfg.Video.MaxUploadSizeMB,
 		})
 	}
 }
@@ -973,8 +1065,9 @@ func handleDocumentUpload(app *App) http.HandlerFunc {
 			return
 		}
 
-		// Parse multipart form (max 50MB)
-		if err := r.ParseMultipartForm(50 << 20); err != nil {
+		// Parse multipart form (use configured max upload size)
+		maxSize := int64(app.configManager.Get().Video.MaxUploadSizeMB) << 20
+		if err := r.ParseMultipartForm(maxSize); err != nil {
 			writeError(w, http.StatusBadRequest, "failed to parse multipart form")
 			return
 		}
@@ -1297,12 +1390,12 @@ func handleVideoCheckDeps(app *App) http.HandlerFunc {
 		}
 		cfg := app.configManager.Get()
 		if cfg == nil {
-			writeJSON(w, http.StatusOK, map[string]bool{"ffmpeg_ok": false, "sensevoice_ok": false})
+			writeJSON(w, http.StatusOK, map[string]bool{"ffmpeg_ok": false, "rapidspeech_ok": false})
 			return
 		}
 		vp := video.NewParser(cfg.Video)
-		ffmpegOK, senseVoiceOK := vp.CheckDependencies()
-		writeJSON(w, http.StatusOK, map[string]bool{"ffmpeg_ok": ffmpegOK, "sensevoice_ok": senseVoiceOK})
+		ffmpegOK, rapidSpeechOK := vp.CheckDependencies()
+		writeJSON(w, http.StatusOK, map[string]bool{"ffmpeg_ok": ffmpegOK, "rapidspeech_ok": rapidSpeechOK})
 	}
 }
 
@@ -1536,6 +1629,71 @@ func handleImageUpload(app *App) http.HandlerFunc {
 		}
 
 		url := "/api/images/" + filename
+		writeJSON(w, http.StatusOK, map[string]string{"url": url})
+	}
+}
+
+// handleKnowledgeVideoUpload handles video uploads for knowledge entries.
+func handleKnowledgeVideoUpload(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		_, _, err := getAdminSession(app, r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err.Error())
+			return
+		}
+
+		// Parse multipart form (use configured max upload size)
+		maxSize := int64(app.configManager.Get().Video.MaxUploadSizeMB) << 20
+		if err := r.ParseMultipartForm(maxSize); err != nil {
+			writeError(w, http.StatusBadRequest, "failed to parse form")
+			return
+		}
+
+		file, header, err := r.FormFile("video")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "missing video in upload")
+			return
+		}
+		defer file.Close()
+
+		// Validate video type
+		ext := strings.ToLower(filepath.Ext(header.Filename))
+		allowedExts := map[string]bool{".mp4": true, ".avi": true, ".mkv": true, ".mov": true, ".webm": true}
+		if !allowedExts[ext] {
+			writeError(w, http.StatusBadRequest, "不支持的视频格式，支持 MP4/AVI/MKV/MOV/WebM")
+			return
+		}
+
+		data, err := io.ReadAll(file)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read video")
+			return
+		}
+
+		// Generate unique filename
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to generate ID")
+			return
+		}
+		filename := fmt.Sprintf("%x%s", b, ext)
+
+		// Save to data/videos/knowledge/
+		videoDir := filepath.Join(".", "data", "videos", "knowledge")
+		if err := os.MkdirAll(videoDir, 0755); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to create video dir")
+			return
+		}
+		if err := os.WriteFile(filepath.Join(videoDir, filename), data, 0644); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save video")
+			return
+		}
+
+		url := "/api/videos/knowledge/" + filename
 		writeJSON(w, http.StatusOK, map[string]string{"url": url})
 	}
 }

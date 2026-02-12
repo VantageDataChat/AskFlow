@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -98,10 +97,13 @@ func (a *vectorArena) append(vec []float32) int {
 }
 
 // queryCache provides an LRU cache for recent vector search results.
+// Uses a ring buffer for O(1) eviction instead of O(n) slice copy.
 type queryCache struct {
 	mu      sync.Mutex
 	entries map[uint64]queryCacheEntry
-	order   []uint64
+	ring    []uint64 // ring buffer for eviction order
+	head    int      // next write position
+	count   int      // number of valid entries in ring
 	maxSize int
 	ttl     time.Duration
 }
@@ -114,7 +116,7 @@ type queryCacheEntry struct {
 func newQueryCache(maxSize int, ttl time.Duration) *queryCache {
 	return &queryCache{
 		entries: make(map[uint64]queryCacheEntry, maxSize),
-		order:   make([]uint64, 0, maxSize),
+		ring:    make([]uint64, maxSize),
 		maxSize: maxSize,
 		ttl:     ttl,
 	}
@@ -138,12 +140,15 @@ func (qc *queryCache) put(key uint64, results []SearchResult) {
 	qc.mu.Lock()
 	defer qc.mu.Unlock()
 	if _, ok := qc.entries[key]; !ok {
-		if len(qc.order) >= qc.maxSize {
-			oldest := qc.order[0]
-			qc.order = qc.order[1:]
-			delete(qc.entries, oldest)
+		if qc.count >= qc.maxSize {
+			// Evict the oldest entry at the current head position
+			evictIdx := (qc.head - qc.count + qc.maxSize) % qc.maxSize
+			delete(qc.entries, qc.ring[evictIdx])
+		} else {
+			qc.count++
 		}
-		qc.order = append(qc.order, key)
+		qc.ring[qc.head] = key
+		qc.head = (qc.head + 1) % qc.maxSize
 	}
 	qc.entries[key] = queryCacheEntry{results: results, timestamp: time.Now()}
 }
@@ -152,7 +157,8 @@ func (qc *queryCache) invalidate() {
 	qc.mu.Lock()
 	defer qc.mu.Unlock()
 	qc.entries = make(map[uint64]queryCacheEntry, qc.maxSize)
-	qc.order = qc.order[:0]
+	qc.head = 0
+	qc.count = 0
 }
 
 // scoredItem is used by the per-worker min-heap to track top-K results efficiently.
@@ -184,6 +190,7 @@ type SQLiteVectorStore struct {
 	norms          []float32
 	arena          vectorArena
 	partitionIndex map[string][]int
+	globalIndex    []int // pre-built [0..n) index for unpartitioned search
 	loaded         bool
 	searchCache    *queryCache
 }
@@ -245,6 +252,7 @@ func (s *SQLiteVectorStore) loadCache() error {
 		s.norms = nil
 		s.arena = vectorArena{}
 		s.partitionIndex = make(map[string][]int)
+		s.globalIndex = nil
 		s.loaded = true
 		return nil
 	}
@@ -309,8 +317,23 @@ func (s *SQLiteVectorStore) loadCache() error {
 	s.norms = norms
 	s.arena.data = arenaData
 	s.partitionIndex = partitionIndex
+	s.rebuildGlobalIndex()
 	s.loaded = true
 	return nil
+}
+
+// rebuildGlobalIndex builds the pre-computed [0..n) index slice used for
+// unpartitioned searches, avoiding per-query allocation.
+func (s *SQLiteVectorStore) rebuildGlobalIndex() {
+	n := len(s.meta)
+	if cap(s.globalIndex) >= n {
+		s.globalIndex = s.globalIndex[:n]
+	} else {
+		s.globalIndex = make([]int, n)
+	}
+	for i := range s.globalIndex {
+		s.globalIndex[i] = i
+	}
 }
 
 func (s *SQLiteVectorStore) ensureCache() error {
@@ -426,6 +449,7 @@ func (s *SQLiteVectorStore) Store(docID string, chunks []VectorChunk) error {
 			}
 			s.arena.data = append(s.arena.data, ne.vec32...)
 			s.partitionIndex[ne.partitionID] = append(s.partitionIndex[ne.partitionID], idx)
+			s.globalIndex = append(s.globalIndex, idx)
 		}
 	} else {
 		if err := s.loadCache(); err != nil {
@@ -437,23 +461,45 @@ func (s *SQLiteVectorStore) Store(docID string, chunks []VectorChunk) error {
 	return nil
 }
 
+// hashQueryVector produces a cache key by sampling elements spread across the
+// entire vector, reducing collision risk for high-dimensional embeddings.
 func hashQueryVector(qv []float32, topK int, threshold float64, partitionID string) uint64 {
 	const (
-		offset64 = 14695981039346656037
-		prime64  = 1099511628211
+		offset64   = 14695981039346656037
+		prime64    = 1099511628211
+		numSamples = 16
 	)
 	h := uint64(offset64)
 	n := len(qv)
-	if n > 8 {
-		n = 8
+
+	// Sample up to numSamples elements evenly spread across the vector
+	samples := numSamples
+	if n < samples {
+		samples = n
 	}
-	for i := 0; i < n; i++ {
-		bits := math.Float32bits(qv[i])
+	if samples > 0 {
+		step := n / samples
+		if step == 0 {
+			step = 1
+		}
+		for i := 0; i < samples; i++ {
+			idx := i * step
+			if idx >= n {
+				break
+			}
+			bits := math.Float32bits(qv[idx])
+			h ^= uint64(bits)
+			h *= prime64
+		}
+	}
+
+	// Also mix in the last element for tail sensitivity
+	if n > 0 {
+		bits := math.Float32bits(qv[n-1])
 		h ^= uint64(bits)
 		h *= prime64
-		h ^= uint64(bits >> 16)
-		h *= prime64
 	}
+
 	h ^= uint64(topK)
 	h *= prime64
 	h ^= math.Float64bits(threshold)
@@ -464,6 +510,7 @@ func hashQueryVector(qv []float32, topK int, threshold float64, partitionID stri
 	}
 	return h
 }
+
 
 // dotProductF32x8 computes dot product with 8-way loop unrolling.
 func dotProductF32x8(a, b []float32) float32 {
@@ -512,16 +559,22 @@ func (s *SQLiteVectorStore) Search(queryVector []float64, topK int, threshold fl
 		return cached, nil
 	}
 
-	s.mu.Lock()
-	if err := s.ensureCache(); err != nil {
+	s.mu.RLock()
+	if !s.loaded {
+		s.mu.RUnlock()
+		s.mu.Lock()
+		if err := s.ensureCache(); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
 		s.mu.Unlock()
-		return nil, err
+		s.mu.RLock()
 	}
 	meta := s.meta
 	normsArr := s.norms
 	arena := s.arena
 	indices := s.getRelevantIndices(partitionID)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	if len(meta) == 0 || len(indices) == 0 || arena.dim == 0 {
 		return nil, nil
@@ -691,11 +744,7 @@ func (s *SQLiteVectorStore) Search(queryVector []float64, topK int, threshold fl
 
 func (s *SQLiteVectorStore) getRelevantIndices(partitionID string) []int {
 	if partitionID == "" {
-		indices := make([]int, len(s.meta))
-		for i := range indices {
-			indices[i] = i
-		}
-		return indices
+		return s.globalIndex
 	}
 	partChunks := s.partitionIndex[partitionID]
 	publicChunks := s.partitionIndex[""]
@@ -711,15 +760,22 @@ func (s *SQLiteVectorStore) getRelevantIndices(partitionID string) []int {
 
 // TextSearch performs a text-based similarity search using keyword overlap
 // and pre-computed character bigram Jaccard similarity.
+// Uses per-worker top-K min-heaps to avoid sorting all hits.
 func (s *SQLiteVectorStore) TextSearch(query string, topK int, threshold float64, partitionID string) ([]SearchResult, error) {
-	s.mu.Lock()
-	if err := s.ensureCache(); err != nil {
+	s.mu.RLock()
+	if !s.loaded {
+		s.mu.RUnlock()
+		s.mu.Lock()
+		if err := s.ensureCache(); err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
 		s.mu.Unlock()
-		return nil, err
+		s.mu.RLock()
 	}
 	meta := s.meta
 	indices := s.getRelevantIndices(partitionID)
-	s.mu.Unlock()
+	s.mu.RUnlock()
 
 	if len(meta) == 0 || len(indices) == 0 {
 		return nil, nil
@@ -748,42 +804,129 @@ func (s *SQLiteVectorStore) TextSearch(query string, topK int, threshold float64
 			end = len(indices)
 		}
 		go func(idxSlice []int) {
-			var local []scored
+			// Per-worker top-K min-heap to avoid collecting all hits
+			h := make([]scored, 0, topK+1)
+			hLen := 0
 			for _, idx := range idxSlice {
 				m := &meta[idx]
 				kwScore := keywordOverlap(queryKeywords, m.textLower)
 				bigramScore := jaccardBigrams(queryBigrams, m.bigrams)
 				score := kwScore*0.6 + bigramScore*0.4
-				if score >= threshold {
-					local = append(local, scored{idx: idx, score: score})
+				if score < threshold {
+					continue
+				}
+				if hLen < topK {
+					h = append(h, scored{idx: idx, score: score})
+					hLen++
+					// Sift up
+					i := hLen - 1
+					for i > 0 {
+						parent := (i - 1) / 2
+						if h[parent].score <= h[i].score {
+							break
+						}
+						h[parent], h[i] = h[i], h[parent]
+						i = parent
+					}
+				} else if score > h[0].score {
+					h[0] = scored{idx: idx, score: score}
+					// Sift down
+					i := 0
+					for {
+						left := 2*i + 1
+						if left >= hLen {
+							break
+						}
+						smallest := left
+						right := left + 1
+						if right < hLen && h[right].score < h[left].score {
+							smallest = right
+						}
+						if h[i].score <= h[smallest].score {
+							break
+						}
+						h[i], h[smallest] = h[smallest], h[i]
+						i = smallest
+					}
 				}
 			}
-			hitsCh <- partialHits{hits: local}
+			hitsCh <- partialHits{hits: h[:hLen]}
 		}(indices[start:end])
 	}
 
-	var hits []scored
+	// Merge per-worker heaps into final top-K
+	merged := make([]scored, 0, topK+1)
+	mergedLen := 0
 	for w := 0; w < numWorkers; w++ {
 		ph := <-hitsCh
-		hits = append(hits, ph.hits...)
+		for _, item := range ph.hits {
+			if mergedLen < topK {
+				merged = append(merged, item)
+				mergedLen++
+				i := mergedLen - 1
+				for i > 0 {
+					parent := (i - 1) / 2
+					if merged[parent].score <= merged[i].score {
+						break
+					}
+					merged[parent], merged[i] = merged[i], merged[parent]
+					i = parent
+				}
+			} else if item.score > merged[0].score {
+				merged[0] = item
+				i := 0
+				for {
+					left := 2*i + 1
+					if left >= mergedLen {
+						break
+					}
+					smallest := left
+					right := left + 1
+					if right < mergedLen && merged[right].score < merged[left].score {
+						smallest = right
+					}
+					if merged[i].score <= merged[smallest].score {
+						break
+					}
+					merged[i], merged[smallest] = merged[smallest], merged[i]
+					i = smallest
+				}
+			}
+		}
 	}
 
-	sort.Slice(hits, func(i, j int) bool {
-		return hits[i].score > hits[j].score
-	})
-	if len(hits) > topK {
-		hits = hits[:topK]
-	}
-
-	results := make([]SearchResult, len(hits))
-	for i, h := range hits {
-		m := &meta[h.idx]
+	// Extract results in descending score order
+	results := make([]SearchResult, mergedLen)
+	for i := mergedLen - 1; i >= 0; i-- {
+		item := merged[0]
+		mergedLen--
+		if mergedLen > 0 {
+			merged[0] = merged[mergedLen]
+			j := 0
+			for {
+				left := 2*j + 1
+				if left >= mergedLen {
+					break
+				}
+				smallest := left
+				right := left + 1
+				if right < mergedLen && merged[right].score < merged[left].score {
+					smallest = right
+				}
+				if merged[j].score <= merged[smallest].score {
+					break
+				}
+				merged[j], merged[smallest] = merged[smallest], merged[j]
+				j = smallest
+			}
+		}
+		m := &meta[item.idx]
 		results[i] = SearchResult{
 			ChunkText:    m.chunkText,
 			ChunkIndex:   m.chunkIndex,
 			DocumentID:   m.documentID,
 			DocumentName: m.documentName,
-			Score:        h.score,
+			Score:        item.score,
 			ImageURL:     m.imageURL,
 			PartitionID:  m.partitionID,
 		}
@@ -897,6 +1040,7 @@ func (s *SQLiteVectorStore) DeleteByDocID(docID string) error {
 		s.norms = newNorms
 		s.arena.data = newArenaData
 		s.partitionIndex = newPartitionIndex
+		s.rebuildGlobalIndex()
 	}
 
 	s.searchCache.invalidate()

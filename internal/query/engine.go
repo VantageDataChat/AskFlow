@@ -79,12 +79,14 @@ type embeddingCacheEntry struct {
 	timestamp time.Time
 }
 
-// embeddingCache provides a simple LRU cache for embedding API results.
-// Avoids redundant API calls for repeated or similar questions.
+// embeddingCache provides a ring-buffer LRU cache for embedding API results.
+// Uses O(1) eviction instead of O(n) slice copy.
 type embeddingCache struct {
 	mu      sync.Mutex
 	entries map[string]embeddingCacheEntry
-	order   []string
+	ring    []string // ring buffer for eviction order
+	head    int
+	count   int
 	maxSize int
 	ttl     time.Duration
 }
@@ -92,7 +94,7 @@ type embeddingCache struct {
 func newEmbeddingCache(maxSize int, ttl time.Duration) *embeddingCache {
 	return &embeddingCache{
 		entries: make(map[string]embeddingCacheEntry, maxSize),
-		order:   make([]string, 0, maxSize),
+		ring:    make([]string, maxSize),
 		maxSize: maxSize,
 		ttl:     ttl,
 	}
@@ -115,12 +117,14 @@ func (ec *embeddingCache) put(text string, vector []float64) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
 	if _, ok := ec.entries[text]; !ok {
-		if len(ec.order) >= ec.maxSize {
-			oldest := ec.order[0]
-			ec.order = ec.order[1:]
-			delete(ec.entries, oldest)
+		if ec.count >= ec.maxSize {
+			evictIdx := (ec.head - ec.count + ec.maxSize) % ec.maxSize
+			delete(ec.entries, ec.ring[evictIdx])
+		} else {
+			ec.count++
 		}
-		ec.order = append(ec.order, text)
+		ec.ring[ec.head] = text
+		ec.head = (ec.head + 1) % ec.maxSize
 	}
 	ec.entries[text] = embeddingCacheEntry{vector: vector, timestamp: time.Now()}
 }
@@ -686,31 +690,41 @@ func (qe *QueryEngine) findDocumentImages(results []vectorstore.SearchResult) []
 		return nil
 	}
 
+	// Batch query: single IN clause instead of N+1 queries
+	ids := make([]string, 0, len(docIDs))
+	for id := range docIDs {
+		ids = append(ids, id)
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `SELECT document_id, image_url, chunk_text FROM chunks WHERE document_id IN (` +
+		strings.Join(placeholders, ",") + `) AND image_url != '' AND image_url IS NOT NULL`
+	rows, err := qe.db.Query(query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
 	var images []SourceRef
-	for docID, docName := range docIDs {
-		rows, err := qe.db.Query(
-			`SELECT image_url, chunk_text FROM chunks WHERE document_id = ? AND image_url != '' AND image_url IS NOT NULL`,
-			docID,
-		)
-		if err != nil {
+	for rows.Next() {
+		var docID, imgURL, chunkText string
+		if err := rows.Scan(&docID, &imgURL, &chunkText); err != nil {
 			continue
 		}
-		for rows.Next() {
-			var imgURL, chunkText string
-			if err := rows.Scan(&imgURL, &chunkText); err != nil {
-				continue
-			}
-			if imgURL == "" {
-				continue
-			}
-			images = append(images, SourceRef{
-				DocumentName: docName,
-				ChunkIndex:   -1,
-				Snippet:      chunkText,
-				ImageURL:     imgURL,
-			})
+		if imgURL == "" {
+			continue
 		}
-		rows.Close()
+		images = append(images, SourceRef{
+			DocumentName: docIDs[docID],
+			ChunkIndex:   -1,
+			Snippet:      chunkText,
+			ImageURL:     imgURL,
+		})
 	}
 
 	return images

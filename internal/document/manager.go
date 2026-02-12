@@ -420,8 +420,8 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 	dm.mu.RUnlock()
 
 	// Check VideoConfig is configured
-	if cfg.FFmpegPath == "" && cfg.SenseVoicePath == "" {
-		return fmt.Errorf("视频检索功能未启用，请先在设置中配置 ffmpeg 和 sensevoice 路径")
+	if cfg.FFmpegPath == "" && cfg.RapidSpeechPath == "" {
+		return fmt.Errorf("视频检索功能未启用，请先在设置中配置 ffmpeg 和 rapidspeech 路径")
 	}
 
 	// Save video file to disk
@@ -929,4 +929,10 @@ func (dm *DocumentManager) GetEmbeddingService() embedding.EmbeddingService {
 // StoreChunks stores pre-built vector chunks into the vector store.
 func (dm *DocumentManager) StoreChunks(docID string, chunks []vectorstore.VectorChunk) error {
 	return dm.vectorStore.Store(docID, chunks)
+}
+
+// ProcessVideoForKnowledge is a public wrapper for processing video files in knowledge entries.
+// It saves the video file to a permanent location and processes it for transcript and keyframes.
+func (dm *DocumentManager) ProcessVideoForKnowledge(docID, docName string, fileData []byte, videoURL string, productID string) error {
+	return dm.processVideo(docID, docName, fileData, productID)
 }

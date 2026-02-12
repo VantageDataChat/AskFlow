@@ -104,10 +104,11 @@ type OAuthConfig struct {
 
 // VideoConfig holds video processing configuration.
 type VideoConfig struct {
-	FFmpegPath       string `json:"ffmpeg_path"`       // ffmpeg executable path, empty means video not supported
-	SenseVoicePath   string `json:"sensevoice_path"`   // sense-voice-cpp executable path, empty means skip transcription
-	KeyframeInterval int    `json:"keyframe_interval"` // keyframe sampling interval in seconds, default 10
-	SenseVoiceModel  string `json:"sensevoice_model"`  // sense-voice model path (model.bin file)
+	FFmpegPath        string `json:"ffmpeg_path"`        // ffmpeg executable path, empty means video not supported
+	RapidSpeechPath   string `json:"rapidspeech_path"`   // rs-asr-offline executable path, empty means skip transcription
+	KeyframeInterval  int    `json:"keyframe_interval"`  // keyframe sampling interval in seconds, default 10
+	RapidSpeechModel  string `json:"rapidspeech_model"`  // RapidSpeech model path (model.gguf file)
+	MaxUploadSizeMB   int    `json:"max_upload_size_mb"` // max video/document upload size in MB, default 500
 }
 
 // AdminConfig holds admin authentication configuration.
@@ -195,6 +196,7 @@ func DefaultConfig() *Config {
 		},
 		Video: VideoConfig{
 			KeyframeInterval: 10,
+			MaxUploadSizeMB:  500,
 		},
 	}
 }
@@ -548,24 +550,33 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		cm.config.Video.FFmpegPath = s
-	case "video.sensevoice_path":
+	case "video.rapidspeech_path":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
 		}
-		cm.config.Video.SenseVoicePath = s
+		cm.config.Video.RapidSpeechPath = s
 	case "video.keyframe_interval":
 		n, err := toInt(val)
 		if err != nil {
 			return err
 		}
 		cm.config.Video.KeyframeInterval = n
-	case "video.sensevoice_model":
+	case "video.rapidspeech_model":
 		s, ok := val.(string)
 		if !ok {
 			return errors.New("expected string")
 		}
-		cm.config.Video.SenseVoiceModel = s
+		cm.config.Video.RapidSpeechModel = s
+	case "video.max_upload_size_mb":
+		n, err := toInt(val)
+		if err != nil {
+			return err
+		}
+		if n < 1 {
+			return errors.New("max_upload_size_mb must be at least 1")
+		}
+		cm.config.Video.MaxUploadSizeMB = n
 
 	// Server fields
 	case "server.port":
@@ -720,6 +731,9 @@ func (cm *ConfigManager) applyDefaults(cfg *Config) {
 	}
 	if cfg.Video.KeyframeInterval == 0 {
 		cfg.Video.KeyframeInterval = defaults.Video.KeyframeInterval
+	}
+	if cfg.Video.MaxUploadSizeMB == 0 {
+		cfg.Video.MaxUploadSizeMB = defaults.Video.MaxUploadSizeMB
 	}
 }
 
