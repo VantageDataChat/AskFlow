@@ -1629,7 +1629,11 @@
                     if (resp && resp.status === 'failed') {
                         showAdminToast(i18n.t('admin_doc_upload_failed') + (resp.error ? ' - ' + resp.error : ''), 'error');
                     } else {
-                        showAdminToast(i18n.t('admin_doc_upload_success'), 'success');
+                        var msg = i18n.t('admin_doc_upload_success');
+                        if (resp && resp.stats) {
+                            msg += ' - ' + i18n.t('admin_doc_upload_stats', { chars: resp.stats.text_chars, images: resp.stats.image_count });
+                        }
+                        showAdminToast(msg, 'success');
                     }
                 } catch (e) {
                     showAdminToast(i18n.t('admin_doc_upload_success'), 'success');
@@ -1718,8 +1722,12 @@
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_doc_url_failed')); });
             return res.json();
         })
-        .then(function () {
-            showAdminToast(i18n.t('admin_doc_url_success'), 'success');
+        .then(function (resp) {
+            var msg = i18n.t('admin_doc_url_success');
+            if (resp && resp.stats) {
+                msg += ' - ' + i18n.t('admin_doc_url_stats', { chars: resp.stats.text_chars, images: resp.stats.image_count });
+            }
+            showAdminToast(msg, 'success');
             input.value = '';
             handleAdminURLCancel();
             loadDocumentList();

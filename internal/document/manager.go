@@ -60,15 +60,22 @@ type DocumentManager struct {
 	validateURL func(string) error
 }
 
+// ImportStats holds statistics about the imported document content.
+type ImportStats struct {
+	TextChars  int `json:"text_chars"`
+	ImageCount int `json:"image_count"`
+}
+
 // DocumentInfo holds metadata about a document stored in the system.
 type DocumentInfo struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Status    string    `json:"status"` // "processing", "success", "failed"
-	Error     string    `json:"error,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	ProductID string    `json:"product_id"`
+	ID        string       `json:"id"`
+	Name      string       `json:"name"`
+	Type      string       `json:"type"`
+	Status    string       `json:"status"` // "processing", "success", "failed"
+	Error     string       `json:"error,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
+	ProductID string       `json:"product_id"`
+	Stats     *ImportStats `json:"stats,omitempty"`
 }
 
 
@@ -125,7 +132,8 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 	}
 
 	// Non-video files: process synchronously
-	if processErr := dm.processFile(docID, req.FileName, req.FileData, fileType, req.ProductID); processErr != nil {
+	stats, processErr := dm.processFile(docID, req.FileName, req.FileData, fileType, req.ProductID)
+	if processErr != nil {
 		dm.updateDocumentStatus(docID, "failed", processErr.Error())
 		doc.Status = "failed"
 		doc.Error = processErr.Error()
@@ -134,6 +142,7 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 
 	dm.updateDocumentStatus(docID, "success", "")
 	doc.Status = "success"
+	doc.Stats = stats
 	return doc, nil
 }
 
@@ -281,7 +290,8 @@ func (dm *DocumentManager) UploadURL(req UploadURLRequest) (*DocumentInfo, error
 	}
 
 	// Fetch → Chunk → Embed → Store
-	if err := dm.processURL(docID, req.URL, req.ProductID); err != nil {
+	stats, err := dm.processURL(docID, req.URL, req.ProductID)
+	if err != nil {
 		dm.updateDocumentStatus(docID, "failed", err.Error())
 		doc.Status = "failed"
 		doc.Error = err.Error()
@@ -290,6 +300,7 @@ func (dm *DocumentManager) UploadURL(req UploadURLRequest) (*DocumentInfo, error
 
 	dm.updateDocumentStatus(docID, "success", "")
 	doc.Status = "success"
+	doc.Stats = stats
 	return doc, nil
 }
 
@@ -363,20 +374,24 @@ func (dm *DocumentManager) ListDocuments(productID string) ([]DocumentInfo, erro
 // processFile parses a file, chunks the text, embeds, and stores vectors.
 // It performs content-level deduplication: if a document with the same content
 // hash already exists, the upload is skipped to save API calls.
-func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, fileType string, productID string) error {
+func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, fileType string, productID string) (*ImportStats, error) {
 	result, err := dm.parser.Parse(fileData, fileType)
 	if err != nil {
-		return fmt.Errorf("parse error: %w", err)
+		return nil, fmt.Errorf("parse error: %w", err)
 	}
 	if result.Text == "" && len(result.Images) == 0 {
-		return fmt.Errorf("文档内容为空")
+		return nil, fmt.Errorf("文档内容为空")
+	}
+
+	stats := &ImportStats{
+		TextChars: len([]rune(result.Text)),
 	}
 
 	// Document-level dedup: check if identical content already exists
 	if result.Text != "" {
 		hash := contentHash(result.Text)
 		if existingID := dm.findDocumentByContentHash(hash); existingID != "" {
-			return fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
+			return nil, fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
 		}
 		// Store the content hash for future dedup checks
 		dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
@@ -385,11 +400,12 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 	// Store text chunks
 	if result.Text != "" {
 		if err := dm.chunkEmbedStore(docID, docName, result.Text, productID); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	// Store image embeddings
+	imageCount := 0
 	for i, img := range result.Images {
 		imgURL := img.URL
 		// For embedded images (e.g. from PDF), save to disk and generate URL
@@ -421,10 +437,13 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 		}}
 		if err := dm.vectorStore.Store(docID, imgChunk); err != nil {
 			fmt.Printf("Warning: failed to store image vector %d: %v\n", i, err)
+		} else {
+			imageCount++
 		}
 	}
+	stats.ImageCount = imageCount
 
-	return nil
+	return stats, nil
 }
 
 // processVideo handles video file processing: extract transcript and keyframes,
@@ -688,29 +707,29 @@ func (dm *DocumentManager) PreviewURL(rawURL string) (*URLPreviewResult, error) 
 }
 
 // processURL fetches URL content and processes it as plain text.
-func (dm *DocumentManager) processURL(docID, url string, productID string) error {
+func (dm *DocumentManager) processURL(docID, url string, productID string) (*ImportStats, error) {
 	if err := dm.validateURL(url); err != nil {
-		return err
+		return nil, err
 	}
 
 	resp, err := dm.httpClient.Get(url)
 	if err != nil {
-		return fmt.Errorf("failed to fetch URL: %w", err)
+		return nil, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("URL returned HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("URL returned HTTP %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20)) // 10MB limit
 	if err != nil {
-		return fmt.Errorf("failed to read URL content: %w", err)
+		return nil, fmt.Errorf("failed to read URL content: %w", err)
 	}
 
 	text := strings.TrimSpace(string(body))
 	if text == "" {
-		return fmt.Errorf("URL内容为空")
+		return nil, fmt.Errorf("URL内容为空")
 	}
 
 	// Detect HTML content and parse it with image extraction
@@ -719,22 +738,26 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) error
 	if isHTML {
 		result, err := dm.parser.ParseWithBaseURL(body, "html", url)
 		if err != nil {
-			return fmt.Errorf("HTML parse error: %w", err)
+			return nil, fmt.Errorf("HTML parse error: %w", err)
+		}
+		stats := &ImportStats{
+			TextChars: len([]rune(result.Text)),
 		}
 		// Document-level dedup for HTML content
 		if result.Text != "" {
 			hash := contentHash(result.Text)
 			if existingID := dm.findDocumentByContentHash(hash); existingID != "" {
-				return fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
+				return nil, fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
 			}
 			dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
 		}
 		if result.Text != "" {
 			if err := dm.chunkEmbedStore(docID, url, result.Text, productID); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		// Embed images found in the HTML
+		imageCount := 0
 		for i, img := range result.Images {
 			if img.URL == "" {
 				continue
@@ -755,19 +778,25 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) error
 			}}
 			if err := dm.vectorStore.Store(docID, imgChunk); err != nil {
 				fmt.Printf("Warning: failed to store HTML image vector %d: %v\n", i, err)
+			} else {
+				imageCount++
 			}
 		}
-		return nil
+		stats.ImageCount = imageCount
+		return stats, nil
 	}
 
 	// Document-level dedup for plain text URL content
 	hash := contentHash(text)
 	if existingID := dm.findDocumentByContentHash(hash); existingID != "" {
-		return fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
+		return nil, fmt.Errorf("文档内容重复，与已有文档相同 (ID: %s)", existingID)
 	}
 	dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
 
-	return dm.chunkEmbedStore(docID, url, text, productID)
+	if err := dm.chunkEmbedStore(docID, url, text, productID); err != nil {
+		return nil, err
+	}
+	return &ImportStats{TextChars: len([]rune(text))}, nil
 }
 
 // validateExternalURL checks that a URL is a valid external HTTP(S) URL

@@ -62,7 +62,7 @@ func (dp *DocumentParser) ParseWithBaseURL(fileData []byte, fileType string, bas
 	return dp.Parse(fileData, fileType)
 }
 
-// parsePDF extracts text and images from PDF data using gopdf2's native parser.
+// parsePDF extracts text and images from PDF data using GoPDF2.
 func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -76,72 +76,51 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 		return nil, fmt.Errorf("pdf解析错误: 不是有效的PDF文件")
 	}
 
-	// Use native ExtractTextFromAllPages instead of gofpdi-based GetSourcePDFPageCountFromBytes,
-	// which panics or fails on many valid PDFs.
-	textMap, err := gopdf.ExtractTextFromAllPages(data)
+	// Get page count
+	pageCount, err := gopdf.GetSourcePDFPageCountFromBytes(data)
 	if err != nil {
 		return nil, fmt.Errorf("pdf解析错误: %w", err)
 	}
 
-	// Collect page indices and sort for deterministic output
-	var pageIndices []int
-	for idx := range textMap {
-		pageIndices = append(pageIndices, idx)
-	}
-	sort.Ints(pageIndices)
-
-	pageCount := 0
+	// Extract text page by page
 	var sb strings.Builder
-	for _, pageIdx := range pageIndices {
-		if pageIdx+1 > pageCount {
-			pageCount = pageIdx + 1
+	for i := 0; i < pageCount; i++ {
+		text, err := gopdf.ExtractPageText(data, i)
+		if err != nil {
+			continue
 		}
-		texts := textMap[pageIdx]
-		var pageText strings.Builder
-		for _, t := range texts {
-			if t.Text != "" {
-				if pageText.Len() > 0 {
-					pageText.WriteString(" ")
-				}
-				pageText.WriteString(t.Text)
-			}
-		}
-		if pageText.Len() > 0 {
+		if text != "" {
 			if sb.Len() > 0 {
 				sb.WriteString("\n\n")
 			}
-			sb.WriteString(pageText.String())
+			sb.WriteString(text)
 		}
 	}
 
-	// Extract images from all pages
+	// Extract images (best-effort, non-fatal)
 	var images []ImageRef
-	imgMap, imgErr := gopdf.ExtractImagesFromAllPages(data)
-	if imgErr == nil {
-		var imgPageIndices []int
-		for idx := range imgMap {
-			imgPageIndices = append(imgPageIndices, idx)
-		}
-		sort.Ints(imgPageIndices)
-		for _, pageIdx := range imgPageIndices {
-			if pageIdx+1 > pageCount {
-				pageCount = pageIdx + 1
+	func() {
+		defer func() { recover() }()
+		imgMap, imgErr := gopdf.ExtractImagesFromAllPages(data)
+		if imgErr == nil {
+			var imgPageIndices []int
+			for idx := range imgMap {
+				imgPageIndices = append(imgPageIndices, idx)
 			}
-			for j, img := range imgMap[pageIdx] {
-				if len(img.Data) == 0 || img.Width < 10 || img.Height < 10 {
-					continue // skip tiny or empty images
+			sort.Ints(imgPageIndices)
+			for _, pageIdx := range imgPageIndices {
+				for j, img := range imgMap[pageIdx] {
+					if len(img.Data) == 0 || img.Width < 10 || img.Height < 10 {
+						continue
+					}
+					images = append(images, ImageRef{
+						Alt:  fmt.Sprintf("PDF第%d页图片%d", pageIdx+1, j+1),
+						Data: img.Data,
+					})
 				}
-				images = append(images, ImageRef{
-					Alt:  fmt.Sprintf("PDF第%d页图片%d", pageIdx+1, j+1),
-					Data: img.Data,
-				})
 			}
 		}
-	}
-
-	if pageCount == 0 {
-		pageCount = len(textMap)
-	}
+	}()
 
 	return &ParseResult{
 		Text: CleanText(sb.String()),

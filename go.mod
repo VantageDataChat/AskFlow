@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/VantageDataChat/GoExcel v0.0.0-20260210221956-22a34d8dea7f
-	github.com/VantageDataChat/GoPDF2 v0.0.0-20260210221934-debe2ff9c48d
+	github.com/VantageDataChat/GoPDF2 v0.0.0-20260212143022-4f8ad48dca6e
 	github.com/VantageDataChat/GoPPT v0.0.0-20260210220934-e91ef3c4e651
 	github.com/VantageDataChat/GoWord v0.0.0-20260210220908-40c2b82002d1
 	github.com/mattn/go-sqlite3 v1.14.34
@@ -17,8 +17,7 @@ require (
 )
 
 require (
-	github.com/phpdave11/gofpdi v1.0.15 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	go.mozilla.org/pkcs7 v0.9.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 )
