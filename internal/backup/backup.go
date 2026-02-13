@@ -388,8 +388,18 @@ func sqlQuote(v interface{}) string {
 	}
 }
 
+// validBackupTables is a whitelist of tables allowed in backup operations.
+var validBackupTables = map[string]bool{
+	"documents": true, "chunks": true, "video_segments": true, "admin_users": true,
+	"pending_questions": true, "users": true, "products": true, "admin_user_products": true,
+	"login_attempts": true, "login_bans": true,
+}
+
 // getColumns returns column names for a table.
 func getColumns(db *sql.DB, table string) ([]string, error) {
+	if !validBackupTables[table] {
+		return nil, fmt.Errorf("invalid table name: %s", table)
+	}
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return nil, err
@@ -415,6 +425,9 @@ func getColumns(db *sql.DB, table string) ([]string, error) {
 
 // countRows returns the row count for a table.
 func countRows(db *sql.DB, table string) (int, error) {
+	if !validBackupTables[table] {
+		return 0, fmt.Errorf("invalid table name: %s", table)
+	}
 	var n int
 	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).Scan(&n)
 	return n, err

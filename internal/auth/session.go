@@ -111,6 +111,16 @@ func (sm *SessionManager) ValidateSession(sessionID string) (*Session, error) {
 		return nil, fmt.Errorf("session expired (max age)")
 	}
 
+	// Sliding window: extend session expiry on each successful validation
+	// Only update if more than half the expiry duration has passed to reduce DB writes
+	remaining := time.Until(s.ExpiresAt)
+	if remaining < sm.expiry/2 {
+		newExpiry := time.Now().UTC().Add(sm.expiry)
+		sm.db.Exec("UPDATE sessions SET expires_at = ? WHERE id = ?",
+			newExpiry.Format(time.RFC3339), sessionID)
+		s.ExpiresAt = newExpiry
+	}
+
 	return &s, nil
 }
 

@@ -33,7 +33,7 @@ var (
 )
 
 func init() {
-	mrand.Seed(time.Now().UnixNano())
+	// mrand.Seed is deprecated since Go 1.20; the global source is auto-seeded.
 	tt, err := opentype.Parse(gobold.TTF)
 	if err != nil {
 		panic("captcha: failed to parse font: " + err.Error())

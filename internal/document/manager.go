@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -128,7 +129,7 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 	// Save original file to disk
 	if err := dm.saveOriginalFile(docID, req.FileName, req.FileData); err != nil {
 		// Non-fatal: log but continue processing
-		fmt.Printf("Warning: failed to save original file: %v\n", err)
+		log.Printf("Warning: failed to save original file: %v", err)
 	}
 
 	// For video files, process asynchronously to avoid HTTP timeout
@@ -147,14 +148,14 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 			case processErr := <-done:
 				if processErr != nil {
 					dm.updateDocumentStatus(docID, "failed", processErr.Error())
-					fmt.Printf("Video processing failed for %s: %v\n", docID, processErr)
+					log.Printf("Video processing failed for %s: %v", docID, processErr)
 				} else {
 					dm.updateDocumentStatus(docID, "success", "")
-					fmt.Printf("Video processing completed for %s\n", docID)
+					log.Printf("Video processing completed for %s", docID)
 				}
 			case <-ctx.Done():
 				dm.updateDocumentStatus(docID, "failed", "视频处理超时")
-				fmt.Printf("Video processing timed out for %s\n", docID)
+				log.Printf("Video processing timed out for %s", docID)
 			}
 		}()
 		return doc, nil
@@ -451,7 +452,7 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 		if imgURL == "" && len(img.Data) > 0 {
 			savedURL, saveErr := dm.saveExtractedImage(img.Data)
 			if saveErr != nil {
-				fmt.Printf("Warning: failed to save extracted image %d: %v\n", i, saveErr)
+				log.Printf("Warning: failed to save extracted image %d: %v", i, saveErr)
 				continue
 			}
 			imgURL = savedURL
@@ -462,7 +463,7 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 		vec, err := dm.embeddingService.EmbedImageURL(imgURL)
 		if err != nil {
 			// Non-fatal: skip images that fail to embed
-			fmt.Printf("Warning: failed to embed image %d (%s): %v\n", i, img.Alt, err)
+			log.Printf("Warning: failed to embed image %d (%s): %v", i, img.Alt, err)
 			continue
 		}
 		imgChunk := []vectorstore.VectorChunk{{
@@ -475,7 +476,7 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 			ProductID:    productID,
 		}}
 		if err := dm.vectorStore.Store(docID, imgChunk); err != nil {
-			fmt.Printf("Warning: failed to store image vector %d: %v\n", i, err)
+			log.Printf("Warning: failed to store image vector %d: %v", i, err)
 		} else {
 			imageCount++
 		}
@@ -492,25 +493,30 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 	cfg := dm.videoConfig
 	dm.mu.RUnlock()
 
-	// Check VideoConfig is configured
-	if cfg.FFmpegPath == "" && cfg.RapidSpeechPath == "" {
-		return fmt.Errorf("视频检索功能未启用，请先在设置中配置 ffmpeg 和 rapidspeech 路径")
+	// Locate the video file already saved by saveOriginalFile.
+	// Fall back to writing it if not found (e.g. saveOriginalFile failed earlier).
+	uploadDir := filepath.Join(".", "data", "uploads", docID)
+	videoPath := dm.findSavedFile(uploadDir)
+	if videoPath == "" {
+		if err := os.MkdirAll(uploadDir, 0755); err != nil {
+			return fmt.Errorf("创建上传目录失败: %w", err)
+		}
+		safeName := sanitizeFilename(docName, docID)
+		videoPath = filepath.Join(uploadDir, safeName)
+		if err := os.WriteFile(videoPath, fileData, 0644); err != nil {
+			return fmt.Errorf("保存视频文件失败: %w", err)
+		}
 	}
 
-	// Save video file to disk
-	uploadDir := filepath.Join(".", "data", "uploads", docID)
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return fmt.Errorf("创建上传目录失败: %w", err)
-	}
-	// Sanitize filename: replace characters illegal on Windows (: * ? " < > |)
-	safeName := filepath.Base(docName)
-	safeName = strings.NewReplacer(":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_").Replace(safeName)
-	if safeName == "" || safeName == "." || safeName == ".." {
-		safeName = docID + ".video"
-	}
-	videoPath := filepath.Join(uploadDir, safeName)
-	if err := os.WriteFile(videoPath, fileData, 0644); err != nil {
-		return fmt.Errorf("保存视频文件失败: %w", err)
+	// If video tools are not configured, store the filename as a minimal
+	// searchable text chunk so the video can still be found by name.
+	if cfg.FFmpegPath == "" && cfg.RapidSpeechPath == "" {
+		log.Printf("视频检索工具未配置，仅存储文件名作为可搜索文本: %s", docName)
+		fallbackText := fmt.Sprintf("视频文件: %s", docName)
+		if err := dm.chunkEmbedStore(docID, docName, fallbackText, productID); err != nil {
+			return fmt.Errorf("存储视频文件名向量失败: %w", err)
+		}
+		return nil
 	}
 
 	// Create video parser and parse
@@ -590,7 +596,7 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 	// Process keyframes: base64 → EmbedImageURL → store → create video_segments
 	for i, kf := range parseResult.Keyframes {
 		if len(kf.Data) == 0 {
-			fmt.Printf("Warning: keyframe %d has no data\n", i)
+			log.Printf("Warning: keyframe %d has no data", i)
 			continue
 		}
 
@@ -601,7 +607,7 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 		vec, err := dm.embeddingService.EmbedImageURL(dataURL)
 		if err != nil {
 			// Non-fatal: skip frames that fail to embed (Requirement 4.5)
-			fmt.Printf("Warning: failed to embed keyframe %d (%.1fs): %v\n", i, kf.Timestamp, err)
+			log.Printf("Warning: failed to embed keyframe %d (%.1fs): %v", i, kf.Timestamp, err)
 			continue
 		}
 
@@ -616,14 +622,14 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 			ProductID:    productID,
 		}}
 		if err := dm.vectorStore.Store(docID, frameChunk); err != nil {
-			fmt.Printf("Warning: failed to store keyframe vector %d: %v\n", i, err)
+			log.Printf("Warning: failed to store keyframe vector %d: %v", i, err)
 			continue
 		}
 
 		// Create video_segments record for keyframe
 		segID, err := generateID()
 		if err != nil {
-			fmt.Printf("Warning: failed to generate segment ID for keyframe %d: %v\n", i, err)
+			log.Printf("Warning: failed to generate segment ID for keyframe %d: %v", i, err)
 			continue
 		}
 		chunkID := fmt.Sprintf("%s-%d", docID, frameChunkIndex)
@@ -632,11 +638,46 @@ func (dm *DocumentManager) processVideo(docID, docName string, fileData []byte, 
 			segID, docID, "keyframe", kf.Timestamp, kf.Timestamp, kf.FilePath, chunkID,
 		)
 		if err != nil {
-			fmt.Printf("Warning: failed to insert keyframe video_segment: %v\n", err)
+			log.Printf("Warning: failed to insert keyframe video_segment: %v", err)
+		}
+	}
+
+	// Fallback: if no transcript and no keyframes were successfully stored,
+	// store the filename as a minimal searchable text chunk so the video
+	// can still be found by name.
+	if chunkIndex == 0 && len(parseResult.Keyframes) == 0 {
+		log.Printf("视频 %s 未提取到转录或关键帧，存储文件名作为可搜索文本", docID)
+		fallbackText := fmt.Sprintf("视频文件: %s", docName)
+		if err := dm.chunkEmbedStore(docID, docName, fallbackText, productID); err != nil {
+			return fmt.Errorf("存储视频文件名向量失败: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// findSavedFile returns the path to the first regular file in dir, or "" if none found.
+func (dm *DocumentManager) findSavedFile(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return filepath.Join(dir, e.Name())
+		}
+	}
+	return ""
+}
+
+// sanitizeFilename cleans a filename for safe use on all platforms.
+func sanitizeFilename(name, fallbackID string) string {
+	safe := filepath.Base(name)
+	safe = strings.NewReplacer(":", "_", "*", "_", "?", "_", "\"", "_", "<", "_", ">", "_", "|", "_").Replace(safe)
+	if safe == "" || safe == "." || safe == ".." {
+		safe = fallbackID + ".video"
+	}
+	return safe
 }
 
 // mapChunkToTimeRange maps a chunk text back to the transcript segments to determine
@@ -803,7 +844,7 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) (*Imp
 			}
 			vec, err := dm.embeddingService.EmbedImageURL(img.URL)
 			if err != nil {
-				fmt.Printf("Warning: failed to embed HTML image %d (%s): %v\n", i, img.Alt, err)
+				log.Printf("Warning: failed to embed HTML image %d (%s): %v", i, img.Alt, err)
 				continue
 			}
 			imgChunk := []vectorstore.VectorChunk{{
@@ -816,7 +857,7 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) (*Imp
 				ProductID:    productID,
 			}}
 			if err := dm.vectorStore.Store(docID, imgChunk); err != nil {
-				fmt.Printf("Warning: failed to store HTML image vector %d: %v\n", i, err)
+				log.Printf("Warning: failed to store HTML image vector %d: %v", i, err)
 			} else {
 				imageCount++
 			}
@@ -964,7 +1005,7 @@ func (dm *DocumentManager) chunkEmbedStore(docID, docName, text string, productI
 	}
 
 	if len(newTexts) < len(texts) {
-		fmt.Printf("去重: %d/%d 个分块复用了已有向量，节省 %d 次API调用\n",
+		log.Printf("去重: %d/%d 个分块复用了已有向量，节省 %d 次API调用",
 			len(texts)-len(newTexts), len(texts), len(texts)-len(newTexts))
 	}
 

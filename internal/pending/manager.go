@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -261,10 +262,10 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 	if status == "answered" && req.IsEdit {
 		docID := "pending-answer-" + req.QuestionID
 		if err := pm.vectorStore.DeleteByDocID(docID); err != nil {
-			fmt.Printf("Warning: failed to delete old vector data for %s: %v\n", docID, err)
+			log.Printf("Warning: failed to delete old vector data for %s: %v", docID, err)
 		}
 		if _, err := pm.db.Exec(`DELETE FROM documents WHERE id = ?`, docID); err != nil {
-			fmt.Printf("Warning: failed to delete old document record for %s: %v\n", docID, err)
+			log.Printf("Warning: failed to delete old document record for %s: %v", docID, err)
 		}
 	}
 
@@ -346,7 +347,7 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 			}
 			vec, embErr := pm.embeddingService.Embed(imgText)
 			if embErr != nil {
-				fmt.Printf("Warning: failed to embed answer image text %d: %v\n", i, embErr)
+				log.Printf("Warning: failed to embed answer image text %d: %v", i, embErr)
 				continue
 			}
 			imgChunk := []vectorstore.VectorChunk{{
@@ -359,7 +360,7 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 				ProductID:    productID,
 			}}
 			if storeErr := pm.vectorStore.Store(docID, imgChunk); storeErr != nil {
-				fmt.Printf("Warning: failed to store answer image chunk %d: %v\n", i, storeErr)
+				log.Printf("Warning: failed to store answer image chunk %d: %v", i, storeErr)
 			}
 		}
 	}

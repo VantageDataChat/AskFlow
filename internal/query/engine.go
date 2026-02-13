@@ -307,44 +307,44 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 		if err == nil {
 			switch intent.Intent {
 			case "greeting":
-			if debugMode {
-				dbg.Intent = "greeting"
-				dbg.Steps = append(dbg.Steps, "Step 0: intent=greeting, returning product intro")
+				if debugMode {
+					dbg.Intent = "greeting"
+					dbg.Steps = append(dbg.Steps, "Step 0: intent=greeting, returning product intro")
+				}
+				// Return product intro as greeting response, in the user's language
+				intro := "您好！欢迎使用我们的产品。"
+				if cfg != nil && cfg.ProductIntro != "" {
+					intro = cfg.ProductIntro
+				}
+				// Use LLM to translate the greeting to match the user's question language
+				translated, tErr := ls.Generate(
+					"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
+					[]string{intro},
+					req.Question,
+				)
+				if tErr == nil && translated != "" {
+					intro = translated
+				}
+				return &QueryResponse{Answer: intro, DebugInfo: dbg}, nil
+			case "irrelevant":
+				if debugMode {
+					dbg.Intent = "irrelevant"
+					dbg.Steps = append(dbg.Steps, "Step 0: intent=irrelevant, reason="+intent.Reason)
+				}
+				msg := "抱歉，这个问题与我们的产品无关。请问有什么产品方面的问题需要帮助吗？"
+				if intent.Reason != "" {
+					msg = "抱歉，" + intent.Reason + "。请问有什么产品方面的问题需要帮助吗？"
+				}
+				translated, tErr := ls.Generate(
+					"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
+					[]string{msg},
+					req.Question,
+				)
+				if tErr == nil && translated != "" {
+					msg = translated
+				}
+				return &QueryResponse{Answer: msg, DebugInfo: dbg}, nil
 			}
-			// Return product intro as greeting response, in the user's language
-			intro := "您好！欢迎使用我们的产品。"
-			if cfg != nil && cfg.ProductIntro != "" {
-				intro = cfg.ProductIntro
-			}
-			// Use LLM to translate the greeting to match the user's question language
-			translated, tErr := ls.Generate(
-				"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-				[]string{intro},
-				req.Question,
-			)
-			if tErr == nil && translated != "" {
-				intro = translated
-			}
-			return &QueryResponse{Answer: intro, DebugInfo: dbg}, nil
-		case "irrelevant":
-			if debugMode {
-				dbg.Intent = "irrelevant"
-				dbg.Steps = append(dbg.Steps, "Step 0: intent=irrelevant, reason="+intent.Reason)
-			}
-			msg := "抱歉，这个问题与我们的产品无关。请问有什么产品方面的问题需要帮助吗？"
-			if intent.Reason != "" {
-				msg = "抱歉，" + intent.Reason + "。请问有什么产品方面的问题需要帮助吗？"
-			}
-			translated, tErr := ls.Generate(
-				"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-				[]string{msg},
-				req.Question,
-			)
-			if tErr == nil && translated != "" {
-				msg = translated
-			}
-			return &QueryResponse{Answer: msg, DebugInfo: dbg}, nil
-		}
 		}
 	}
 

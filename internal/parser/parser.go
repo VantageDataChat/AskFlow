@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"image/png"
+	"log"
 	"net/url"
 	"regexp"
 	"sort"
@@ -248,13 +249,13 @@ func (dp *DocumentParser) parsePPT(data []byte) (result *ParseResult, err error)
 		// Render slide to image
 		img, renderErr := pres.SlideToImage(i, opts)
 		if renderErr != nil {
-			fmt.Printf("Warning: PPT第%d页渲染失败: %v\n", i+1, renderErr)
+			log.Printf("Warning: PPT第%d页渲染失败: %v", i+1, renderErr)
 			continue
 		}
 
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, img); err != nil {
-			fmt.Printf("Warning: PPT第%d页PNG编码失败: %v\n", i+1, err)
+			log.Printf("Warning: PPT第%d页PNG编码失败: %v", i+1, err)
 			continue
 		}
 

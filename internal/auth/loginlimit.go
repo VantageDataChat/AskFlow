@@ -162,11 +162,12 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 	// Manual bans
 	rows, err := ll.db.Query(`SELECT username, ip, reason, unlocks_at FROM login_bans WHERE unlocks_at > ?`, now.Format(time.RFC3339))
 	if err == nil {
-		defer rows.Close()
 		for rows.Next() {
 			var b BanEntry
 			var unlocks string
-			rows.Scan(&b.Username, &b.IP, &b.Reason, &unlocks)
+			if err := rows.Scan(&b.Username, &b.IP, &b.Reason, &unlocks); err != nil {
+				continue
+			}
 			b.Type = "manual"
 			b.UnlocksAt = unlocks
 			b.IsManual = true
@@ -177,6 +178,7 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 			}
 			bans = append(bans, b)
 		}
+		rows.Close()
 	}
 
 	// Rule 1: users with >=10 consecutive failures (locked 1 hour)
@@ -188,27 +190,37 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 		GROUP BY username HAVING cnt >= 10
 	`)
 	if err == nil {
-		defer userRows.Close()
+		type userFail struct {
+			username string
+			cnt      int
+		}
+		var userFails []userFail
 		for userRows.Next() {
-			var username string
-			var cnt int
-			userRows.Scan(&username, &cnt)
+			var uf userFail
+			if err := userRows.Scan(&uf.username, &uf.cnt); err != nil {
+				continue
+			}
+			userFails = append(userFails, uf)
+		}
+		userRows.Close()
+
+		for _, uf := range userFails {
 			// Find the first failure in the consecutive streak
 			var firstFailStr sql.NullString
 			ll.db.QueryRow(`
 				SELECT created_at FROM login_attempts WHERE username = ? AND success = 0 AND created_at > (
 					SELECT COALESCE(MAX(created_at), '1970-01-01') FROM login_attempts WHERE username = ? AND success = 1
 				) ORDER BY created_at ASC LIMIT 1
-			`, username, username).Scan(&firstFailStr)
+			`, uf.username, uf.username).Scan(&firstFailStr)
 			if firstFailStr.Valid {
 				if t, e := time.Parse(time.RFC3339, firstFailStr.String); e == nil {
 					unlocks := t.Add(1 * time.Hour)
 					if now.Before(unlocks) {
 						bans = append(bans, BanEntry{
 							Type:      "user_consecutive",
-							Username:  username,
-							FailCount: cnt,
-							Reason:    fmt.Sprintf("连续%d次密码错误，锁定1小时", cnt),
+							Username:  uf.username,
+							FailCount: uf.cnt,
+							Reason:    fmt.Sprintf("连续%d次密码错误，锁定1小时", uf.cnt),
 							UnlocksAt: unlocks.Format(time.RFC3339),
 						})
 					}
@@ -226,11 +238,12 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 		GROUP BY username HAVING cnt >= 50
 	`, todayStart, tomorrowStart)
 	if err == nil {
-		defer dailyRows.Close()
 		for dailyRows.Next() {
 			var username string
 			var cnt int
-			dailyRows.Scan(&username, &cnt)
+			if err := dailyRows.Scan(&username, &cnt); err != nil {
+				continue
+			}
 			bans = append(bans, BanEntry{
 				Type:      "user_daily",
 				Username:  username,
@@ -239,6 +252,7 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 				UnlocksAt: tomorrowStart,
 			})
 		}
+		dailyRows.Close()
 	}
 
 	// Rule 3: IPs with >=100 consecutive failures (locked 10 days)
@@ -250,14 +264,24 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 		GROUP BY ip HAVING cnt >= 100
 	`)
 	if err == nil {
-		defer ipRows.Close()
+		type ipFail struct {
+			ip  string
+			cnt int
+		}
+		var ipFails []ipFail
 		for ipRows.Next() {
-			var ip string
-			var cnt int
-			ipRows.Scan(&ip, &cnt)
+			var f ipFail
+			if err := ipRows.Scan(&f.ip, &f.cnt); err != nil {
+				continue
+			}
+			ipFails = append(ipFails, f)
+		}
+		ipRows.Close()
+
+		for _, f := range ipFails {
 			var hundredthFailStr sql.NullString
 			ll.db.QueryRow(
-				`SELECT created_at FROM login_attempts WHERE ip = ? AND success = 0 ORDER BY created_at DESC LIMIT 1 OFFSET 99`, ip,
+				`SELECT created_at FROM login_attempts WHERE ip = ? AND success = 0 ORDER BY created_at DESC LIMIT 1 OFFSET 99`, f.ip,
 			).Scan(&hundredthFailStr)
 			if hundredthFailStr.Valid {
 				if t, e := time.Parse(time.RFC3339, hundredthFailStr.String); e == nil {
@@ -265,9 +289,9 @@ func (ll *LoginLimiter) ListBans() []BanEntry {
 					if now.Before(unlocks) {
 						bans = append(bans, BanEntry{
 							Type:      "ip",
-							IP:        ip,
-							FailCount: cnt,
-							Reason:    fmt.Sprintf("IP连续%d次密码错误，锁定10天", cnt),
+							IP:        f.ip,
+							FailCount: f.cnt,
+							Reason:    fmt.Sprintf("IP连续%d次密码错误，锁定10天", f.cnt),
 							UnlocksAt: unlocks.Format(time.RFC3339),
 						})
 					}

@@ -301,14 +301,11 @@ func TestVideoConfig_DefaultValues(t *testing.T) {
 	if cfg.Video.KeyframeInterval != 10 {
 		t.Errorf("Video.KeyframeInterval = %d, want 10", cfg.Video.KeyframeInterval)
 	}
-	if cfg.Video.WhisperModel != "base" {
-		t.Errorf("Video.WhisperModel = %q, want \"base\"", cfg.Video.WhisperModel)
-	}
 	if cfg.Video.FFmpegPath != "" {
 		t.Errorf("Video.FFmpegPath = %q, want empty", cfg.Video.FFmpegPath)
 	}
-	if cfg.Video.WhisperPath != "" {
-		t.Errorf("Video.WhisperPath = %q, want empty", cfg.Video.WhisperPath)
+	if cfg.Video.RapidSpeechPath != "" {
+		t.Errorf("Video.RapidSpeechPath = %q, want empty", cfg.Video.RapidSpeechPath)
 	}
 }
 
@@ -319,10 +316,10 @@ func TestVideoConfig_UpdateAndPersist(t *testing.T) {
 	}
 
 	updates := map[string]interface{}{
-		"video.ffmpeg_path":       "/usr/bin/ffmpeg",
-		"video.whisper_path":      "/usr/bin/whisper",
-		"video.keyframe_interval": 5,
-		"video.whisper_model":     "medium",
+		"video.ffmpeg_path":        "/usr/bin/ffmpeg",
+		"video.rapidspeech_path":   "/usr/bin/rapidspeech",
+		"video.keyframe_interval":  5,
+		"video.rapidspeech_model":  "/models/model.gguf",
 	}
 	if err := cm.Update(updates); err != nil {
 		t.Fatalf("Update: %v", err)
@@ -332,14 +329,14 @@ func TestVideoConfig_UpdateAndPersist(t *testing.T) {
 	if cfg.Video.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("Video.FFmpegPath = %q, want /usr/bin/ffmpeg", cfg.Video.FFmpegPath)
 	}
-	if cfg.Video.WhisperPath != "/usr/bin/whisper" {
-		t.Errorf("Video.WhisperPath = %q, want /usr/bin/whisper", cfg.Video.WhisperPath)
+	if cfg.Video.RapidSpeechPath != "/usr/bin/rapidspeech" {
+		t.Errorf("Video.RapidSpeechPath = %q, want /usr/bin/rapidspeech", cfg.Video.RapidSpeechPath)
 	}
 	if cfg.Video.KeyframeInterval != 5 {
 		t.Errorf("Video.KeyframeInterval = %d, want 5", cfg.Video.KeyframeInterval)
 	}
-	if cfg.Video.WhisperModel != "medium" {
-		t.Errorf("Video.WhisperModel = %q, want medium", cfg.Video.WhisperModel)
+	if cfg.Video.RapidSpeechModel != "/models/model.gguf" {
+		t.Errorf("Video.RapidSpeechModel = %q, want /models/model.gguf", cfg.Video.RapidSpeechModel)
 	}
 
 	// Verify persisted
@@ -354,14 +351,14 @@ func TestVideoConfig_UpdateAndPersist(t *testing.T) {
 	if cfg2.Video.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("persisted Video.FFmpegPath = %q", cfg2.Video.FFmpegPath)
 	}
-	if cfg2.Video.WhisperPath != "/usr/bin/whisper" {
-		t.Errorf("persisted Video.WhisperPath = %q", cfg2.Video.WhisperPath)
+	if cfg2.Video.RapidSpeechPath != "/usr/bin/rapidspeech" {
+		t.Errorf("persisted Video.RapidSpeechPath = %q", cfg2.Video.RapidSpeechPath)
 	}
 	if cfg2.Video.KeyframeInterval != 5 {
 		t.Errorf("persisted Video.KeyframeInterval = %d", cfg2.Video.KeyframeInterval)
 	}
-	if cfg2.Video.WhisperModel != "medium" {
-		t.Errorf("persisted Video.WhisperModel = %q", cfg2.Video.WhisperModel)
+	if cfg2.Video.RapidSpeechModel != "/models/model.gguf" {
+		t.Errorf("persisted Video.RapidSpeechModel = %q", cfg2.Video.RapidSpeechModel)
 	}
 }
 
@@ -391,9 +388,6 @@ func TestVideoConfig_ApplyDefaultsOnLoad(t *testing.T) {
 	if cfg.Video.KeyframeInterval != 10 {
 		t.Errorf("Video.KeyframeInterval = %d, want 10 (default)", cfg.Video.KeyframeInterval)
 	}
-	if cfg.Video.WhisperModel != "base" {
-		t.Errorf("Video.WhisperModel = %q, want \"base\" (default)", cfg.Video.WhisperModel)
-	}
 }
 
 // TestProperty3_VideoConfigPersistenceRoundTrip 验证视频配置持久化往返一致性。
@@ -404,9 +398,9 @@ func TestVideoConfig_ApplyDefaultsOnLoad(t *testing.T) {
 func TestProperty3_VideoConfigPersistenceRoundTrip(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		ffmpegPath := rapid.StringMatching(`[a-zA-Z0-9/._-]{0,50}`).Draw(rt, "ffmpeg_path")
-		whisperPath := rapid.StringMatching(`[a-zA-Z0-9/._-]{0,50}`).Draw(rt, "whisper_path")
+		rapidspeechPath := rapid.StringMatching(`[a-zA-Z0-9/._-]{0,50}`).Draw(rt, "rapidspeech_path")
 		keyframeInterval := rapid.IntRange(1, 120).Draw(rt, "keyframe_interval")
-		whisperModel := rapid.SampledFrom([]string{"tiny", "base", "small", "medium", "large"}).Draw(rt, "whisper_model")
+		rapidspeechModel := rapid.StringMatching(`[a-zA-Z0-9/._-]{0,50}`).Draw(rt, "rapidspeech_model")
 
 		path := filepath.Join(t.TempDir(), fmt.Sprintf("config-%d.json", time.Now().UnixNano()))
 		cm, err := NewConfigManagerWithKey(path, testKey())
@@ -418,10 +412,10 @@ func TestProperty3_VideoConfigPersistenceRoundTrip(t *testing.T) {
 		}
 
 		updates := map[string]interface{}{
-			"video.ffmpeg_path":       ffmpegPath,
-			"video.whisper_path":      whisperPath,
-			"video.keyframe_interval": keyframeInterval,
-			"video.whisper_model":     whisperModel,
+			"video.ffmpeg_path":        ffmpegPath,
+			"video.rapidspeech_path":   rapidspeechPath,
+			"video.keyframe_interval":  keyframeInterval,
+			"video.rapidspeech_model":  rapidspeechModel,
 		}
 		if err := cm.Update(updates); err != nil {
 			rt.Fatalf("Update: %v", err)
@@ -440,14 +434,14 @@ func TestProperty3_VideoConfigPersistenceRoundTrip(t *testing.T) {
 		if cfg.Video.FFmpegPath != ffmpegPath {
 			rt.Errorf("FFmpegPath: got %q, want %q", cfg.Video.FFmpegPath, ffmpegPath)
 		}
-		if cfg.Video.WhisperPath != whisperPath {
-			rt.Errorf("WhisperPath: got %q, want %q", cfg.Video.WhisperPath, whisperPath)
+		if cfg.Video.RapidSpeechPath != rapidspeechPath {
+			rt.Errorf("RapidSpeechPath: got %q, want %q", cfg.Video.RapidSpeechPath, rapidspeechPath)
 		}
 		if cfg.Video.KeyframeInterval != keyframeInterval {
 			rt.Errorf("KeyframeInterval: got %d, want %d", cfg.Video.KeyframeInterval, keyframeInterval)
 		}
-		if cfg.Video.WhisperModel != whisperModel {
-			rt.Errorf("WhisperModel: got %q, want %q", cfg.Video.WhisperModel, whisperModel)
+		if cfg.Video.RapidSpeechModel != rapidspeechModel {
+			rt.Errorf("RapidSpeechModel: got %q, want %q", cfg.Video.RapidSpeechModel, rapidspeechModel)
 		}
 	})
 }

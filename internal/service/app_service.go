@@ -175,6 +175,8 @@ func (as *AppService) Run(ctx context.Context) error {
 
 // runSessionCleanup runs periodic session cleanup in the background.
 func (as *AppService) runSessionCleanup(ctx context.Context) {
+	// Create a single LoginLimiter instance for reuse across cleanup cycles
+	ll := auth.NewLoginLimiter(as.database)
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 	for {
@@ -188,7 +190,6 @@ func (as *AppService) runSessionCleanup(ctx context.Context) {
 				log.Printf("Cleaned %d expired sessions", n)
 			}
 			// Clean old login attempt records (older than 30 days)
-			ll := auth.NewLoginLimiter(as.database)
 			ll.CleanOld()
 		}
 	}

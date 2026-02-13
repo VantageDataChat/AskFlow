@@ -522,10 +522,14 @@ func TestUploadFile_VideoTypesAccepted(t *testing.T) {
 		if err != nil && err.Error() == "不支持的文件格式" {
 			t.Errorf("video type %q should be supported but was rejected", ft)
 		}
-		// Without VideoConfig, it should fail with config error
-		if err == nil && doc != nil && doc.Status == "failed" {
-			if doc.Error != "视频检索功能未启用，请先在设置中配置 ffmpeg 和 whisper 路径" {
-				t.Logf("video type %q failed with unexpected error: %s", ft, doc.Error)
+		// Without VideoConfig, video should still succeed via fallback filename embedding
+		if err == nil && doc != nil {
+			// Wait for async processing
+			time.Sleep(200 * time.Millisecond)
+			var status string
+			dm.db.QueryRow(`SELECT status FROM documents WHERE id = ?`, doc.ID).Scan(&status)
+			if status != "success" {
+				t.Errorf("video type %q: expected status 'success' (fallback), got %q", ft, status)
 			}
 		}
 	}
@@ -549,15 +553,11 @@ func TestUploadFile_VideoRejectedWhenConfigEmpty(t *testing.T) {
 	}
 	// Video processing is async; wait for goroutine to finish
 	time.Sleep(200 * time.Millisecond)
-	// Re-read status from DB
-	var status, errMsg string
-	dm.db.QueryRow(`SELECT status, error FROM documents WHERE id = ?`, doc.ID).Scan(&status, &errMsg)
-	if status != "failed" {
-		t.Fatalf("expected status 'failed', got %q", status)
-	}
-	expectedErr := "视频检索功能未启用，请先在设置中配置 ffmpeg 和 rapidspeech 路径"
-	if errMsg != expectedErr {
-		t.Fatalf("expected error %q, got %q", expectedErr, errMsg)
+	// Re-read status from DB — should succeed with fallback filename embedding
+	var status string
+	dm.db.QueryRow(`SELECT status FROM documents WHERE id = ?`, doc.ID).Scan(&status)
+	if status != "success" {
+		t.Fatalf("expected status 'success' (fallback filename embedding), got %q", status)
 	}
 }
 
@@ -582,13 +582,11 @@ func TestUploadFile_VideoRejectedWhenBothPathsEmpty(t *testing.T) {
 	}
 	// Video processing is async; wait for goroutine to finish
 	time.Sleep(200 * time.Millisecond)
-	var status, errMsg string
-	dm.db.QueryRow(`SELECT status, error FROM documents WHERE id = ?`, doc.ID).Scan(&status, &errMsg)
-	if status != "failed" {
-		t.Fatalf("expected status 'failed', got %q", status)
-	}
-	if errMsg != "视频检索功能未启用，请先在设置中配置 ffmpeg 和 rapidspeech 路径" {
-		t.Fatalf("unexpected error: %s", errMsg)
+	var status string
+	dm.db.QueryRow(`SELECT status FROM documents WHERE id = ?`, doc.ID).Scan(&status)
+	// Should succeed with fallback filename embedding instead of failing
+	if status != "success" {
+		t.Fatalf("expected status 'success' (fallback filename embedding), got %q", status)
 	}
 }
 
@@ -875,13 +873,13 @@ func TestProperty9_DocumentListProductFiltering(t *testing.T) {
 	}
 }
 
-// TestProperty2_VideoUploadRejectedWhenUnconfigured 验证未配置时拒绝视频上传。
-// 对于任意视频上传请求，当 VideoConfig 的 ffmpeg_path 和 whisper_path 均为空时，
-// DocumentManager 应拒绝该请求并返回错误。
+// TestProperty2_VideoUploadFallbackWhenUnconfigured 验证未配置视频工具时的降级行为。
+// 对于任意视频上传请求，当 VideoConfig 的 ffmpeg_path 和 rapidspeech_path 均为空时，
+// DocumentManager 应使用文件名作为可搜索文本进行降级处理，状态为 success。
 //
-// **Feature: video-retrieval, Property 2: 未配置时拒绝视频上传**
+// **Feature: video-retrieval, Property 2: 未配置时降级处理视频上传**
 // **Validates: Requirements 1.2**
-func TestProperty2_VideoUploadRejectedWhenUnconfigured(t *testing.T) {
+func TestProperty2_VideoUploadFallbackWhenUnconfigured(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		videoType := rapid.SampledFrom([]string{"mp4", "avi", "mkv", "mov", "webm"}).Draw(rt, "video_type")
 		fileName := rapid.StringMatching(`[a-zA-Z0-9]{1,20}`).Draw(rt, "file_name") + "." + videoType
@@ -908,14 +906,11 @@ func TestProperty2_VideoUploadRejectedWhenUnconfigured(t *testing.T) {
 		}
 		// Video processing is async; wait for goroutine to finish
 		time.Sleep(200 * time.Millisecond)
-		var status, errMsg string
-		dm.db.QueryRow(`SELECT status, error FROM documents WHERE id = ?`, doc.ID).Scan(&status, &errMsg)
-		if status != "failed" {
-			rt.Errorf("expected status 'failed', got %q", status)
-		}
-		expectedErr := "视频检索功能未启用，请先在设置中配置 ffmpeg 和 rapidspeech 路径"
-		if errMsg != expectedErr {
-			rt.Errorf("expected error %q, got %q", expectedErr, errMsg)
+		var status string
+		dm.db.QueryRow(`SELECT status FROM documents WHERE id = ?`, doc.ID).Scan(&status)
+		// Should succeed with fallback filename embedding
+		if status != "success" {
+			rt.Errorf("expected status 'success' (fallback), got %q", status)
 		}
 	})
 }

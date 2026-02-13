@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,10 @@ type APIEmbeddingService struct {
 
 // NewAPIEmbeddingService creates a new APIEmbeddingService with the given configuration.
 func NewAPIEmbeddingService(endpoint, apiKey, modelName string, useMultimodal bool) *APIEmbeddingService {
+	// Warn if API key is sent over non-HTTPS connection
+	if apiKey != "" && !strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+		log.Printf("[WARNING] Embedding API key is being sent over non-HTTPS endpoint: %s", endpoint)
+	}
 	return &APIEmbeddingService{
 		Endpoint:      endpoint,
 		APIKey:        apiKey,
