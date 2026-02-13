@@ -648,12 +648,12 @@ func registerAPIHandlers(app *App) {
 	http.HandleFunc("/api/auth/login", secureAPI(rateLimit(handleUserLogin(app))))
 	http.HandleFunc("/api/auth/verify", secureAPI(handleVerifyEmail(app)))
 	http.HandleFunc("/api/captcha", secureAPI(handleCaptcha()))
-	http.HandleFunc("/api/captcha/image", secureAPI(handleCaptchaImage()))
+	http.HandleFunc("/api/captcha/image", secureAPI(rateLimit(handleCaptchaImage())))
 
 	// Public info
 	http.HandleFunc("/api/product-intro", secureAPI(handleProductIntro(app)))
 	http.HandleFunc("/api/app-info", secureAPI(handleAppInfo(app)))
-	http.HandleFunc("/api/translate-product-name", secureAPI(handleTranslateProductName(app)))
+	http.HandleFunc("/api/translate-product-name", secureAPI(rateLimit(handleTranslateProductName(app))))
 
 	// Query (rate limited to prevent abuse)
 	http.HandleFunc("/api/query", secureAPI(rateLimit(handleQuery(app))))
@@ -835,12 +835,10 @@ func handleOAuthCallback(app *App) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		// Validate OAuth state to prevent CSRF
-		if req.State != "" {
-			if !app.oauthClient.ValidateState(req.State) {
-				writeError(w, http.StatusBadRequest, "invalid or expired OAuth state")
-				return
-			}
+		// Validate OAuth state to prevent CSRF (state is required)
+		if req.State == "" || !app.oauthClient.ValidateState(req.State) {
+			writeError(w, http.StatusBadRequest, "invalid or expired OAuth state")
+			return
 		}
 		resp, err := app.HandleOAuthCallback(req.Provider, req.Code)
 		if err != nil {
@@ -1102,6 +1100,12 @@ func handleTranslateProductName(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// Require admin session to prevent LLM abuse
+		_, _, err := getAdminSession(app, r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 		lang := r.URL.Query().Get("lang")
@@ -1588,6 +1592,12 @@ func handleVideoCheckDeps(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// Require admin session
+		_, _, err := getAdminSession(app, r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
 		cfg := app.configManager.Get()

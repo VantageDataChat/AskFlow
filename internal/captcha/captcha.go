@@ -33,6 +33,7 @@ var (
 )
 
 func init() {
+	mrand.Seed(time.Now().UnixNano())
 	tt, err := opentype.Parse(gobold.TTF)
 	if err != nil {
 		panic("captcha: failed to parse font: " + err.Error())
@@ -63,6 +64,16 @@ func Generate() *Response {
 	for k, v := range store {
 		if now.After(v.expiresAt) {
 			delete(store, k)
+		}
+	}
+
+	// Limit store size to prevent memory exhaustion
+	if len(store) > 10000 {
+		for k := range store {
+			delete(store, k)
+			if len(store) <= 5000 {
+				break
+			}
 		}
 	}
 

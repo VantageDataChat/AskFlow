@@ -31,6 +31,10 @@ type APILLMService struct {
 
 // NewAPILLMService creates a new APILLMService with the given configuration.
 func NewAPILLMService(endpoint, apiKey, modelName string, temperature float64, maxTokens int) *APILLMService {
+	// Warn if API key is sent over non-HTTPS connection
+	if apiKey != "" && !strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+		log.Printf("[WARNING] LLM API key is being sent over non-HTTPS endpoint: %s", endpoint)
+	}
 	return &APILLMService{
 		Endpoint:    endpoint,
 		APIKey:      apiKey,

@@ -235,6 +235,29 @@ func (oc *OAuthClient) handleAppleUser(token *oauth2.Token) (*OAuthUser, error) 
 		return nil, fmt.Errorf("Apple OAuth: decode id_token: %w", err)
 	}
 
+	// Validate issuer claim
+	iss := stringVal(claims, "iss")
+	if iss != "https://appleid.apple.com" {
+		return nil, fmt.Errorf("Apple OAuth: invalid issuer: %s", iss)
+	}
+
+	// Validate audience matches our client ID
+	cfg, ok := oc.providers[ProviderApple]
+	if !ok {
+		return nil, fmt.Errorf("Apple OAuth: provider not configured")
+	}
+	aud := stringVal(claims, "aud")
+	if aud != cfg.ClientID {
+		return nil, fmt.Errorf("Apple OAuth: audience mismatch")
+	}
+
+	// Validate token is not expired
+	if exp, ok := claims["exp"].(float64); ok {
+		if time.Now().Unix() > int64(exp) {
+			return nil, fmt.Errorf("Apple OAuth: id_token expired")
+		}
+	}
+
 	user := &OAuthUser{
 		Provider: ProviderApple,
 		ID:       stringVal(claims, "sub"),

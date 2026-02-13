@@ -198,6 +198,16 @@ func NewDocumentManager(
 		db:               db,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 5 {
+					return fmt.Errorf("too many redirects")
+				}
+				// Re-validate each redirect target against SSRF rules
+				if err := validateExternalURL(req.URL.String()); err != nil {
+					return fmt.Errorf("redirect blocked: %w", err)
+				}
+				return nil
+			},
 		},
 		validateURL: validateExternalURL,
 	}
