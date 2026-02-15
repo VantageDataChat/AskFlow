@@ -1056,6 +1056,15 @@ body {
     margin-bottom: 0.125rem;
 }
 
+a.chat-source-download {
+    color: var(--color-primary);
+    text-decoration: none;
+    cursor: pointer;
+}
+a.chat-source-download:hover {
+    text-decoration: underline;
+}
+
 .chat-source-snippet {
     font-size: 0.75rem;
     line-height: 1.4;
@@ -1675,18 +1684,26 @@ body {
 }
 
 .admin-fieldset {
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius);
-    padding: 1.25rem;
+    border: none;
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
     margin-bottom: 1.25rem;
-    background: var(--color-card);
+    background: var(--color-bg);
 }
 
 .admin-fieldset legend {
-    font-size: 0.875rem;
+    float: left;
+    width: 100%;
+    font-size: 0.9375rem;
     font-weight: 600;
     color: var(--color-primary);
-    padding: 0 0.5rem;
+    padding: 0 0 0.75rem 0;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.admin-fieldset legend + * {
+    clear: both;
 }
 
 .admin-form-row {
@@ -1750,6 +1767,204 @@ body {
 
 .admin-form-actions {
     margin-top: 1rem;
+}
+
+/* Product Management - Professional Layout */
+.product-manage-form {
+    max-width: 900px;
+}
+
+.product-add-card {
+    padding: 1.5rem 1.75rem;
+}
+
+.product-add-card legend {
+    font-size: 0.9375rem;
+    letter-spacing: 0.01em;
+}
+
+.product-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 0.875rem;
+}
+
+.product-form-grid .admin-form-row {
+    margin-bottom: 0;
+}
+
+.product-form-grid select {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    font-family: inherit;
+    outline: none;
+    background: var(--color-card);
+    color: inherit;
+    transition: border-color 0.2s;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+}
+
+.product-form-grid select:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
+}
+
+.product-form-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.product-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    flex-wrap: wrap;
+}
+
+.product-checkbox-label small {
+    width: 100%;
+    color: #999;
+    font-size: 0.75rem;
+    margin-top: 0.125rem;
+    padding-left: 1.5rem;
+}
+
+@media (max-width: 600px) {
+    .product-form-grid {
+        grid-template-columns: 1fr;
+    }
+    .product-form-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+    }
+    .product-form-footer .btn-primary {
+        width: 100%;
+    }
+}
+
+/* Product Edit Modal */
+.product-edit-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+    backdrop-filter: blur(2px);
+}
+.product-edit-modal-content {
+    background: #fff;
+    border-radius: 10px;
+    padding: 0;
+    width: 520px;
+    max-width: 92vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    animation: modalFadeIn 0.18s ease-out;
+}
+@keyframes modalFadeIn {
+    from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.product-edit-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.125rem 1.5rem;
+    border-bottom: 1px solid var(--color-border);
+}
+.product-edit-modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text);
+}
+.product-edit-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.35rem;
+    color: #999;
+    cursor: pointer;
+    padding: 0 2px;
+    line-height: 1;
+    border-radius: 4px;
+    transition: color 0.15s, background 0.15s;
+}
+.product-edit-modal-close:hover {
+    color: #333;
+    background: #f0f0f0;
+}
+.product-edit-modal-content > .admin-form-group,
+.product-edit-modal-content > .product-edit-row-2col,
+.product-edit-modal-content > .product-edit-checkbox-row {
+    padding: 0 1.5rem;
+}
+.product-edit-modal-content > .product-edit-row-2col {
+    margin-top: 1.125rem;
+}
+.product-edit-modal-content > .admin-form-group {
+    margin-bottom: 0;
+    margin-top: 0.875rem;
+}
+.product-edit-modal-content > .product-edit-checkbox-row {
+    margin-top: 1rem;
+    margin-bottom: 0;
+}
+.product-edit-modal-content .admin-form-group label {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+}
+.product-edit-modal-content .admin-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+.product-edit-modal-content .admin-input:disabled {
+    background: #f7f7f8;
+    color: #888;
+    cursor: not-allowed;
+    border-color: #e5e5e5;
+}
+.product-edit-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+.product-edit-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.625rem;
+    margin-top: 1.25rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--color-border);
+    background: #fafafa;
+    border-radius: 0 0 10px 10px;
+}
+@media (max-width: 500px) {
+    .product-edit-row-2col {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Dialog Overlay */

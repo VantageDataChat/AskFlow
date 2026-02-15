@@ -660,19 +660,21 @@
                             <h2 data-i18n="admin_products_title">产品管理</h2>
                         </div>
                         <div class="admin-tab-body">
-                            <div class="admin-settings-form">
-                                <fieldset class="admin-fieldset">
+                            <div class="admin-settings-form product-manage-form">
+                                <fieldset class="admin-fieldset product-add-card">
                                     <legend data-i18n="admin_products_add_legend">添加产品</legend>
-                                    <div class="admin-form-row">
-                                        <label data-i18n="admin_products_name">产品名称</label>
-                                        <input type="text" id="product-new-name" data-i18n-placeholder="admin_products_name_placeholder" placeholder="输入产品名称">
-                                    </div>
-                                    <div class="admin-form-row">
-                                        <label data-i18n="admin_products_type">产品类型</label>
-                                        <select id="product-new-type">
-                                            <option value="service" data-i18n="admin_products_type_service">产品服务</option>
-                                            <option value="knowledge_base" data-i18n="admin_products_type_knowledge">知识库</option>
-                                        </select>
+                                    <div class="product-form-grid">
+                                        <div class="admin-form-row">
+                                            <label data-i18n="admin_products_name">产品名称</label>
+                                            <input type="text" id="product-new-name" data-i18n-placeholder="admin_products_name_placeholder" placeholder="输入产品名称">
+                                        </div>
+                                        <div class="admin-form-row">
+                                            <label data-i18n="admin_products_type">产品类型</label>
+                                            <select id="product-new-type">
+                                                <option value="service" data-i18n="admin_products_type_service">产品服务</option>
+                                                <option value="knowledge_base" data-i18n="admin_products_type_knowledge">知识库</option>
+                                            </select>
+                                        </div>
                                     </div>
                                     <div class="admin-form-row">
                                         <label data-i18n="admin_products_desc">产品描述</label>
@@ -682,7 +684,12 @@
                                         <label data-i18n="admin_products_welcome">欢迎消息</label>
                                         <textarea id="product-new-welcome" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选）"></textarea>
                                     </div>
-                                    <div class="admin-form-actions">
+                                    <div class="product-form-footer">
+                                        <label class="product-checkbox-label">
+                                            <input type="checkbox" id="product-new-allow-download">
+                                            <span id="product-allow-download-label" data-i18n="admin_products_allow_download">允许下载参考文档</span>
+                                            <small id="product-allow-download-hint" data-i18n="admin_products_allow_download_hint">启用后，用户可在聊天中下载 PDF/Word/Excel/PPT/视频 等参考文档</small>
+                                        </label>
                                         <button type="button" class="btn-primary" onclick="createProduct()" data-i18n="admin_products_add_btn">添加产品</button>
                                     </div>
                                 </fieldset>
@@ -695,16 +702,56 @@
                                                     <th data-i18n="admin_products_th_name">名称</th>
                                                     <th data-i18n="admin_products_th_type">类型</th>
                                                     <th data-i18n="admin_products_th_desc">描述</th>
+                                                    <th data-i18n="admin_products_th_download">允许下载</th>
                                                     <th data-i18n="admin_products_th_time">创建时间</th>
                                                     <th data-i18n="admin_products_th_action">操作</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="admin-products-tbody">
-                                                <tr><td colspan="5" class="admin-table-empty" data-i18n="admin_products_empty">暂无产品</td></tr>
+                                                <tr><td colspan="6" class="admin-table-empty" data-i18n="admin_products_empty">暂无产品</td></tr>
                                             </tbody>
                                         </table>
                                     </div>
                                 </fieldset>
+
+                                <!-- Product Edit Modal -->
+                                <div id="product-edit-modal" class="product-edit-modal-overlay" style="display:none">
+                                    <div class="product-edit-modal-content">
+                                        <div class="product-edit-modal-header">
+                                            <h3 id="product-edit-modal-title" data-i18n="admin_products_edit_title">修改产品</h3>
+                                            <button class="product-edit-modal-close" onclick="closeProductEditModal()" aria-label="Close">&times;</button>
+                                        </div>
+                                        <input type="hidden" id="product-edit-id">
+                                        <div class="product-edit-row-2col">
+                                            <div class="admin-form-group">
+                                                <label data-i18n="admin_products_th_name">名称</label>
+                                                <input type="text" id="product-edit-name" class="admin-input" disabled>
+                                            </div>
+                                            <div class="admin-form-group">
+                                                <label data-i18n="admin_products_th_type">类型</label>
+                                                <input type="text" id="product-edit-type" class="admin-input" disabled>
+                                            </div>
+                                        </div>
+                                        <div class="admin-form-group">
+                                            <label data-i18n="admin_products_desc">描述</label>
+                                            <input type="text" id="product-edit-desc" class="admin-input" data-i18n-placeholder="admin_products_desc_placeholder" placeholder="输入产品描述（可选）">
+                                        </div>
+                                        <div class="admin-form-group">
+                                            <label data-i18n="admin_products_welcome">欢迎消息</label>
+                                            <textarea id="product-edit-welcome" class="admin-input" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选）"></textarea>
+                                        </div>
+                                        <div class="admin-form-group product-edit-checkbox-row">
+                                            <label class="admin-checkbox-label">
+                                                <input type="checkbox" id="product-edit-allow-download">
+                                                <span data-i18n="admin_products_allow_download">允许下载参考文档</span>
+                                            </label>
+                                        </div>
+                                        <div class="product-edit-modal-footer">
+                                            <button class="btn-secondary btn-sm" id="product-edit-cancel-btn" onclick="closeProductEditModal()" data-i18n="admin_products_edit_cancel">取消</button>
+                                            <button class="btn-primary btn-sm" id="product-edit-save-btn" onclick="saveProductEdit()" data-i18n="admin_products_edit_save">保存</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

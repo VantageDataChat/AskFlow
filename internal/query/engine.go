@@ -31,11 +31,12 @@ type QueryRequest struct {
 
 // QueryResponse represents the result of a RAG query.
 type QueryResponse struct {
-	Answer    string      `json:"answer"`
-	Sources   []SourceRef `json:"sources"`
-	IsPending bool        `json:"is_pending"`
-	Message   string      `json:"message,omitempty"`
-	DebugInfo *DebugInfo  `json:"debug_info,omitempty"`
+	Answer        string      `json:"answer"`
+	Sources       []SourceRef `json:"sources"`
+	IsPending     bool        `json:"is_pending"`
+	AllowDownload bool        `json:"allow_download"`
+	Message       string      `json:"message,omitempty"`
+	DebugInfo     *DebugInfo  `json:"debug_info,omitempty"`
 }
 
 // DebugInfo holds diagnostic information for debugging the query pipeline.

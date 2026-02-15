@@ -1110,6 +1110,8 @@
         // Sources
         if (msg.sources && msg.sources.length > 0) {
             var srcId = 'sources-' + msg.timestamp;
+            var downloadableTypes = { pdf:1, doc:1, docx:1, word:1, xls:1, xlsx:1, excel:1, ppt:1, pptx:1, video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1 };
+            var productId = localStorage.getItem('helpdesk_product_id') || '';
             html += '<div class="chat-sources">';
             html += '<button class="chat-sources-toggle" onclick="toggleSources(\'' + srcId + '\', this)">';
             html += '<span class="arrow">▶</span> ' + i18n.t('chat_source_toggle') + '（' + msg.sources.length + '）';
@@ -1118,7 +1120,14 @@
             for (var j = 0; j < msg.sources.length; j++) {
                 var src = msg.sources[j];
                 html += '<li class="chat-source-item">';
-                html += '<span class="chat-source-name">' + escapeHtml(src.document_name || i18n.t('chat_source_unknown')) + '</span>';
+                var docName = escapeHtml(src.document_name || i18n.t('chat_source_unknown'));
+                var canDownload = msg.allowDownload && src.document_id && src.document_type && downloadableTypes[(src.document_type || '').toLowerCase()];
+                if (canDownload) {
+                    var dlToken = getChatToken();
+                    html += '<a class="chat-source-name chat-source-download" href="/api/documents/public-download/' + encodeURIComponent(src.document_id) + '?product_id=' + encodeURIComponent(productId) + '&token=' + encodeURIComponent(dlToken) + '" title="' + i18n.t('chat_source_download') + '">📥 ' + docName + '</a>';
+                } else {
+                    html += '<span class="chat-source-name">' + docName + '</span>';
+                }
                 if (src.start_time > 0 || src.end_time > 0) {
                     var timeLabel = formatMediaTime(src.start_time || 0);
                     if (src.end_time > 0 && src.end_time !== src.start_time) {
@@ -1565,6 +1574,7 @@
                 content: data.answer || data.message || i18n.t('chat_no_answer'),
                 sources: data.sources || [],
                 isPending: !!data.is_pending,
+                allowDownload: !!data.allow_download,
                 debugInfo: data.debug_info || null,
                 timestamp: Date.now()
             };
@@ -1681,7 +1691,7 @@
         if (tab === 'settings') loadAdminSettings();
         if (tab === 'multimodal') loadMultimodalSettings();
         if (tab === 'users') { loadAdminUsers(); loadProductCheckboxes(); }
-        if (tab === 'products') loadProducts();
+        if (tab === 'products') { loadProducts(); i18n.applyI18nToPage(); }
         if (tab === 'bans') loadLoginBans();
         if (tab === 'customers') { loadAdminCustomers(); i18n.applyI18nToPage(); }
     };
@@ -3567,6 +3577,21 @@
     // --- Product Management ---
 
     function loadProducts() {
+        // Manually apply i18n to product tab elements that may not get translated
+        var dlLabel = document.getElementById('product-allow-download-label');
+        var dlHint = document.getElementById('product-allow-download-hint');
+        if (dlLabel) dlLabel.textContent = i18n.t('admin_products_allow_download');
+        if (dlHint) dlHint.textContent = i18n.t('admin_products_allow_download_hint');
+        // Translate all data-i18n elements within the products tab
+        var tab = document.getElementById('admin-tab-products');
+        if (tab) {
+            tab.querySelectorAll('[data-i18n]').forEach(function (el) {
+                el.textContent = i18n.t(el.getAttribute('data-i18n'));
+            });
+            tab.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
+                el.placeholder = i18n.t(el.getAttribute('data-i18n-placeholder'));
+            });
+        }
         adminFetch('/api/products')
             .then(function (res) {
                 if (!res.ok) throw new Error('load failed');
@@ -3584,8 +3609,11 @@
         var tbody = document.getElementById('admin-products-tbody');
         if (!tbody) return;
 
+        // Cache products for edit access
+        window._cachedProducts = products;
+
         if (!products || products.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
             return;
         }
 
@@ -3594,12 +3622,17 @@
             var p = products[i];
             var createdAt = p.created_at ? new Date(p.created_at).toLocaleString() : '-';
             var typeLabel = p.type === 'knowledge_base' ? i18n.t('admin_products_type_knowledge') : i18n.t('admin_products_type_service');
+            var dlLabel = p.allow_download ? '✅' : '—';
             html += '<tr>' +
                 '<td>' + escapeHtml(p.name) + '</td>' +
                 '<td>' + escapeHtml(typeLabel) + '</td>' +
                 '<td>' + escapeHtml(p.description || '-') + '</td>' +
+                '<td>' + dlLabel + '</td>' +
                 '<td>' + escapeHtml(createdAt) + '</td>' +
-                '<td><button class="btn-danger btn-sm" onclick="deleteProduct(\'' + escapeHtml(p.id) + '\', \'' + escapeHtml(p.name) + '\')">' + i18n.t('admin_products_delete_btn') + '</button></td>' +
+                '<td>' +
+                    '<button class="btn-primary btn-sm" style="margin-right:6px" onclick="editProduct(\'' + escapeHtml(p.id) + '\')">' + i18n.t('admin_products_edit_btn') + '</button>' +
+                    '<button class="btn-danger btn-sm" onclick="deleteProduct(\'' + escapeHtml(p.id) + '\', \'' + escapeHtml(p.name) + '\')">' + i18n.t('admin_products_delete_btn') + '</button>' +
+                '</td>' +
             '</tr>';
         }
         tbody.innerHTML = html;
@@ -3610,6 +3643,7 @@
         var productType = (document.getElementById('product-new-type') || {}).value || 'service';
         var desc = (document.getElementById('product-new-desc') || {}).value || '';
         var welcome = (document.getElementById('product-new-welcome') || {}).value || '';
+        var allowDownload = document.getElementById('product-new-allow-download') ? document.getElementById('product-new-allow-download').checked : false;
 
         if (!name.trim()) {
             showAdminToast(i18n.t('admin_products_name_required'), 'error');
@@ -3619,7 +3653,7 @@
         adminFetch('/api/products', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name.trim(), type: productType, description: desc.trim(), welcome_message: welcome.trim() })
+            body: JSON.stringify({ name: name.trim(), type: productType, description: desc.trim(), welcome_message: welcome.trim(), allow_download: allowDownload })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_products_create_failed')); });
@@ -3631,6 +3665,7 @@
             if (document.getElementById('product-new-type')) document.getElementById('product-new-type').value = 'service';
             if (document.getElementById('product-new-desc')) document.getElementById('product-new-desc').value = '';
             if (document.getElementById('product-new-welcome')) document.getElementById('product-new-welcome').value = '';
+            if (document.getElementById('product-new-allow-download')) document.getElementById('product-new-allow-download').checked = false;
             loadProducts();
         })
         .catch(function (err) {
@@ -3651,6 +3686,87 @@
         })
         .catch(function (err) {
             showAdminToast(err.message || i18n.t('admin_delete_failed'), 'error');
+        });
+    };
+
+    window.editProduct = function (id) {
+        var products = window._cachedProducts || [];
+        var p = null;
+        for (var i = 0; i < products.length; i++) {
+            if (products[i].id === id) { p = products[i]; break; }
+        }
+        if (!p) return;
+
+        var modal = document.getElementById('product-edit-modal');
+        if (!modal) return;
+
+        document.getElementById('product-edit-id').value = p.id;
+        document.getElementById('product-edit-name').value = p.name;
+        var typeDisplay = p.type === 'knowledge_base' ? i18n.t('admin_products_type_knowledge') : i18n.t('admin_products_type_service');
+        document.getElementById('product-edit-type').value = typeDisplay;
+        document.getElementById('product-edit-type').setAttribute('data-raw-type', p.type);
+        document.getElementById('product-edit-desc').value = p.description || '';
+        document.getElementById('product-edit-welcome').value = p.welcome_message || '';
+        document.getElementById('product-edit-allow-download').checked = !!p.allow_download;
+
+        // Update modal title
+        var titleEl = document.getElementById('product-edit-modal-title');
+        if (titleEl) titleEl.textContent = i18n.t('admin_products_edit_title');
+        var saveBtn = document.getElementById('product-edit-save-btn');
+        if (saveBtn) saveBtn.textContent = i18n.t('admin_products_edit_save');
+        var cancelBtn = document.getElementById('product-edit-cancel-btn');
+        if (cancelBtn) cancelBtn.textContent = i18n.t('admin_products_edit_cancel');
+
+        // Apply i18n labels inside modal
+        modal.querySelectorAll('[data-i18n]').forEach(function (el) {
+            el.textContent = i18n.t(el.getAttribute('data-i18n'));
+        });
+        modal.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
+            el.placeholder = i18n.t(el.getAttribute('data-i18n-placeholder'));
+        });
+
+        modal.style.display = 'flex';
+
+        // Close on overlay click
+        modal.onclick = function (e) {
+            if (e.target === modal) window.closeProductEditModal();
+        };
+    };
+
+    window.closeProductEditModal = function () {
+        var modal = document.getElementById('product-edit-modal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.saveProductEdit = function () {
+        var id = document.getElementById('product-edit-id').value;
+        var name = document.getElementById('product-edit-name').value.trim();
+        var productType = document.getElementById('product-edit-type').getAttribute('data-raw-type') || document.getElementById('product-edit-type').value;
+        var desc = document.getElementById('product-edit-desc').value.trim();
+        var welcome = document.getElementById('product-edit-welcome').value.trim();
+        var allowDownload = document.getElementById('product-edit-allow-download').checked;
+
+        if (!name) {
+            showAdminToast(i18n.t('admin_products_name_required'), 'error');
+            return;
+        }
+
+        adminFetch('/api/products/' + encodeURIComponent(id), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, type: productType, description: desc, welcome_message: welcome, allow_download: allowDownload })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_products_edit_failed')); });
+            return res.json();
+        })
+        .then(function () {
+            showAdminToast(i18n.t('admin_products_edit_success'), 'success');
+            window.closeProductEditModal();
+            loadProducts();
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_products_edit_failed'), 'error');
         });
     };
 

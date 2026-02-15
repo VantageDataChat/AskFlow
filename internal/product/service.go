@@ -18,6 +18,7 @@ type Product struct {
 	Type           string    `json:"type"`
 	Description    string    `json:"description"`
 	WelcomeMessage string    `json:"welcome_message"`
+	AllowDownload  bool      `json:"allow_download"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -40,7 +41,7 @@ func NewProductService(db *sql.DB) *ProductService {
 
 // Create creates a new product with the given name, description, and welcome message.
 // Returns an error if the name is empty or already exists.
-func (s *ProductService) Create(name, productType, description, welcomeMessage string) (*Product, error) {
+func (s *ProductService) Create(name, productType, description, welcomeMessage string, allowDownload bool) (*Product, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("product name cannot be empty")
@@ -77,8 +78,8 @@ func (s *ProductService) Create(name, productType, description, welcomeMessage s
 
 	now := time.Now()
 	_, err = s.db.Exec(
-		"INSERT INTO products (id, name, type, description, welcome_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		id, name, productType, description, welcomeMessage, now, now,
+		"INSERT INTO products (id, name, type, description, welcome_message, allow_download, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		id, name, productType, description, welcomeMessage, allowDownload, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create product: %w", err)
@@ -90,6 +91,7 @@ func (s *ProductService) Create(name, productType, description, welcomeMessage s
 		Type:           productType,
 		Description:    description,
 		WelcomeMessage: welcomeMessage,
+		AllowDownload:  allowDownload,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}, nil
@@ -97,7 +99,7 @@ func (s *ProductService) Create(name, productType, description, welcomeMessage s
 
 // Update updates an existing product's name, description, and welcome message.
 // Returns an error if the name is empty or already used by another product.
-func (s *ProductService) Update(id, name, productType, description, welcomeMessage string) (*Product, error) {
+func (s *ProductService) Update(id, name, productType, description, welcomeMessage string, allowDownload bool) (*Product, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("product name cannot be empty")
@@ -129,8 +131,8 @@ func (s *ProductService) Update(id, name, productType, description, welcomeMessa
 
 	now := time.Now()
 	result, err := s.db.Exec(
-		"UPDATE products SET name = ?, type = ?, description = ?, welcome_message = ?, updated_at = ? WHERE id = ?",
-		name, productType, description, welcomeMessage, now, id,
+		"UPDATE products SET name = ?, type = ?, description = ?, welcome_message = ?, allow_download = ?, updated_at = ? WHERE id = ?",
+		name, productType, description, welcomeMessage, allowDownload, now, id,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update product: %w", err)
@@ -191,21 +193,23 @@ func (s *ProductService) Delete(id string) error {
 // GetByID returns a product by its ID.
 func (s *ProductService) GetByID(id string) (*Product, error) {
 	var p Product
+	var allowDL int
 	err := s.db.QueryRow(
-		"SELECT id, name, COALESCE(type, 'service'), description, welcome_message, created_at, updated_at FROM products WHERE id = ?", id,
-	).Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &p.CreatedAt, &p.UpdatedAt)
+		"SELECT id, name, COALESCE(type, 'service'), description, welcome_message, COALESCE(allow_download, 0), created_at, updated_at FROM products WHERE id = ?", id,
+	).Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &allowDL, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("product not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get product: %w", err)
 	}
+	p.AllowDownload = allowDL == 1
 	return &p, nil
 }
 
 // List returns all products ordered by created_at.
 func (s *ProductService) List() ([]Product, error) {
-	rows, err := s.db.Query("SELECT id, name, COALESCE(type, 'service'), description, welcome_message, created_at, updated_at FROM products ORDER BY created_at")
+	rows, err := s.db.Query("SELECT id, name, COALESCE(type, 'service'), description, welcome_message, COALESCE(allow_download, 0), created_at, updated_at FROM products ORDER BY created_at")
 	if err != nil {
 		return nil, fmt.Errorf("failed to list products: %w", err)
 	}
@@ -214,9 +218,11 @@ func (s *ProductService) List() ([]Product, error) {
 	var products []Product
 	for rows.Next() {
 		var p Product
-		if err := rows.Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var allowDL int
+		if err := rows.Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &allowDL, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
+		p.AllowDownload = allowDL == 1
 		products = append(products, p)
 	}
 	return products, rows.Err()
@@ -315,7 +321,7 @@ func (s *ProductService) GetByAdminUserID(adminUserID string) ([]Product, error)
 	}
 
 	query := fmt.Sprintf(
-		"SELECT id, name, COALESCE(type, 'service'), description, welcome_message, created_at, updated_at FROM products WHERE id IN (%s) ORDER BY created_at",
+		"SELECT id, name, COALESCE(type, 'service'), description, welcome_message, COALESCE(allow_download, 0), created_at, updated_at FROM products WHERE id IN (%s) ORDER BY created_at",
 		strings.Join(placeholders, ", "),
 	)
 
@@ -328,9 +334,11 @@ func (s *ProductService) GetByAdminUserID(adminUserID string) ([]Product, error)
 	var products []Product
 	for productRows.Next() {
 		var p Product
-		if err := productRows.Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var allowDL int
+		if err := productRows.Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &allowDL, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
+		p.AllowDownload = allowDL == 1
 		products = append(products, p)
 	}
 	return products, productRows.Err()

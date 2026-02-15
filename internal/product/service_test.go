@@ -114,7 +114,7 @@ func TestProperty1_CRUDRoundTrip(t *testing.T) {
 		newName := sanitizeName(newNameSeed, counter+10000)
 
 		// Create
-		created, err := svc.Create(name, "service", desc, welcome)
+		created, err := svc.Create(name, "service", desc, welcome, false)
 		if err != nil {
 			t.Logf("Create failed: %v", err)
 			return false
@@ -133,7 +133,7 @@ func TestProperty1_CRUDRoundTrip(t *testing.T) {
 		}
 
 		// Update
-		updated, err := svc.Update(created.ID, newName, "service", newDesc, newWelcome)
+		updated, err := svc.Update(created.ID, newName, "service", newDesc, newWelcome, false)
 		if err != nil {
 			t.Logf("Update failed: %v", err)
 			return false
@@ -176,14 +176,14 @@ func TestProperty2_NameUniquenessAndNonEmpty(t *testing.T) {
 			name := sanitizeName(nameSeed, counter)
 
 			// First creation should succeed
-			_, err := svc.Create(name, "service", desc1, "")
+			_, err := svc.Create(name, "service", desc1, "", false)
 			if err != nil {
 				t.Logf("First create failed unexpectedly: %v", err)
 				return false
 			}
 
 			// Second creation with same name should fail
-			_, err = svc.Create(name, "service", desc2, "")
+			_, err = svc.Create(name, "service", desc2, "", false)
 			if err == nil {
 				t.Logf("Second create with duplicate name %q should have failed", name)
 				return false
@@ -204,7 +204,7 @@ func TestProperty2_NameUniquenessAndNonEmpty(t *testing.T) {
 			svc := NewProductService(db)
 
 			// Empty string
-			_, err := svc.Create("", "service", "desc", "")
+			_, err := svc.Create("", "service", "desc", "", false)
 			if err == nil {
 				t.Log("Create with empty name should have failed")
 				return false
@@ -213,14 +213,14 @@ func TestProperty2_NameUniquenessAndNonEmpty(t *testing.T) {
 			// Whitespace-only string (1 to 10 spaces)
 			n := int(spaces)%10 + 1
 			ws := strings.Repeat(" ", n)
-			_, err = svc.Create(ws, "service", "desc", "")
+			_, err = svc.Create(ws, "service", "desc", "", false)
 			if err == nil {
 				t.Logf("Create with whitespace-only name %q should have failed", ws)
 				return false
 			}
 
 			// Tabs and mixed whitespace
-			_, err = svc.Create("\t \n", "service", "desc", "")
+			_, err = svc.Create("\t \n", "service", "desc", "", false)
 			if err == nil {
 				t.Log("Create with tab/newline name should have failed")
 				return false
@@ -256,7 +256,7 @@ func TestProperty3_DeleteCascade(t *testing.T) {
 		}
 
 		// Create a product
-		p, err := svc.Create(name, "service", "desc", "")
+		p, err := svc.Create(name, "service", "desc", "", false)
 		if err != nil {
 			t.Logf("Create failed: %v", err)
 			return false
@@ -334,7 +334,7 @@ func TestProperty3_DeleteCascade(t *testing.T) {
 // to an admin user and querying back returns the exact same set, and reassigning
 // returns the new set.
 //
-// **Feature: multi-product-support, Property 4: 管理员-产品分配往返一致性**
+// **Feature: multi-product-support, Property 4: 管理员产品分配往返一致性**
 // **Validates: Requirements 2.1, 2.2, 2.3, 9.4**
 func TestProperty4_AdminProductAssignmentRoundTrip(t *testing.T) {
 	counter := 0
@@ -360,7 +360,7 @@ func TestProperty4_AdminProductAssignmentRoundTrip(t *testing.T) {
 		n := int(numProducts)%5 + 1
 		var productIDs []string
 		for i := 0; i < n; i++ {
-			p, err := svc.Create(fmt.Sprintf("prod_%d_%d", counter, i), "service", "desc", "")
+			p, err := svc.Create(fmt.Sprintf("prod_%d_%d", counter, i), "service", "desc", "", false)
 			if err != nil {
 				t.Logf("Create product failed: %v", err)
 				return false
@@ -474,7 +474,7 @@ func TestProperty5_AdminProductSelectionLogic(t *testing.T) {
 		n := int(numProducts)%5 + 2
 		var allProductIDs []string
 		for i := 0; i < n; i++ {
-			p, err := svc.Create(fmt.Sprintf("prod_%d_%d", counter, i), "service", "desc", "")
+			p, err := svc.Create(fmt.Sprintf("prod_%d_%d", counter, i), "service", "desc", "", false)
 			if err != nil {
 				t.Logf("Create product failed: %v", err)
 				return false
@@ -515,7 +515,7 @@ func TestProperty5_AdminProductSelectionLogic(t *testing.T) {
 			return false
 		}
 
-		// Case 3: Assign zero products → should return ALL products
+		// Case 3: Assign zero products — should return ALL products
 		err = svc.AssignAdminUser(adminID, []string{})
 		if err != nil {
 			t.Logf("AssignAdminUser (zero) failed: %v", err)

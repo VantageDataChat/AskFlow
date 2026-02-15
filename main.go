@@ -729,6 +729,7 @@ func registerAPIHandlers(app *App) {
 	http.HandleFunc("/api/user/preferences", secureAPI(handleUserPreferences(app)))
 
 	// Documents
+	http.HandleFunc("/api/documents/public-download/", secureAPI(handlePublicDocumentDownload(app)))
 	http.HandleFunc("/api/documents/upload", secureAPI(handleDocumentUpload(app)))
 	http.HandleFunc("/api/documents/url/preview", secureAPI(handleDocumentURLPreview(app)))
 	http.HandleFunc("/api/documents/url", secureAPI(handleDocumentURL(app)))
@@ -1321,6 +1322,13 @@ func handleQuery(app *App) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "查询处理失败，请稍后重试")
 			return
 		}
+		// Check if product allows document download
+		if req.ProductID != "" {
+			p, pErr := app.GetProduct(req.ProductID)
+			if pErr == nil && p != nil {
+				resp.AllowDownload = p.AllowDownload
+			}
+		}
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
@@ -1468,6 +1476,85 @@ func handleDocumentURL(app *App) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, doc)
+	}
+}
+
+// handlePublicDocumentDownload allows regular users to download source documents
+// if the product has allow_download enabled and the document type is downloadable.
+func handlePublicDocumentDownload(app *App) http.HandlerFunc {
+	downloadableTypes := map[string]bool{
+		"pdf": true, "doc": true, "docx": true, "word": true,
+		"xls": true, "xlsx": true, "excel": true,
+		"ppt": true, "pptx": true,
+		"mp4": true, "avi": true, "mkv": true, "mov": true, "webm": true,
+		"video": true,
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// Require user session (support token in query param for direct download links)
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" {
+			writeError(w, http.StatusUnauthorized, "未登录")
+			return
+		}
+		session, sErr := app.sessionManager.ValidateSession(token)
+		if sErr != nil {
+			writeError(w, http.StatusUnauthorized, "会话已过期")
+			return
+		}
+		_ = session
+		docID := strings.TrimPrefix(r.URL.Path, "/api/documents/public-download/")
+		if docID == "" || !isValidHexID(docID) {
+			writeError(w, http.StatusBadRequest, "invalid document ID")
+			return
+		}
+		productID := r.URL.Query().Get("product_id")
+		if productID == "" {
+			writeError(w, http.StatusBadRequest, "product_id is required")
+			return
+		}
+		// Check product allows download
+		p, pErr := app.GetProduct(productID)
+		if pErr != nil || p == nil || !p.AllowDownload {
+			writeError(w, http.StatusForbidden, "该产品不允许下载参考文档")
+			return
+		}
+		// Check document type is downloadable
+		docInfo, dErr := app.GetDocumentInfo(docID)
+		if dErr != nil {
+			writeError(w, http.StatusNotFound, "文档未找到")
+			return
+		}
+		docType := strings.ToLower(docInfo.Type)
+		if !downloadableTypes[docType] {
+			writeError(w, http.StatusForbidden, "该文档类型不支持下载")
+			return
+		}
+		// Verify document belongs to the product
+		if docInfo.ProductID != productID && docInfo.ProductID != "" {
+			writeError(w, http.StatusForbidden, "文档不属于该产品")
+			return
+		}
+		filePath, fileName, fErr := app.docManager.GetFilePath(docID)
+		if fErr != nil {
+			writeError(w, http.StatusNotFound, "文件未找到")
+			return
+		}
+		safeName := strings.Map(func(r rune) rune {
+			if r == '"' || r == '\n' || r == '\r' || r == '\\' {
+				return '_'
+			}
+			return r
+		}, fileName)
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+safeName+"\"")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, filePath)
 	}
 }
 
@@ -2265,12 +2352,13 @@ func handleProducts(app *App) http.HandlerFunc {
 				Type           string `json:"type"`
 				Description    string `json:"description"`
 				WelcomeMessage string `json:"welcome_message"`
+				AllowDownload  bool   `json:"allow_download"`
 			}
 			if err := readJSONBody(r, &req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
-			p, err := app.CreateProduct(req.Name, req.Type, req.Description, req.WelcomeMessage)
+			p, err := app.CreateProduct(req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
@@ -2311,12 +2399,13 @@ func handleProductByID(app *App) http.HandlerFunc {
 				Type           string `json:"type"`
 				Description    string `json:"description"`
 				WelcomeMessage string `json:"welcome_message"`
+				AllowDownload  bool   `json:"allow_download"`
 			}
 			if err := readJSONBody(r, &req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
-			p, err := app.UpdateProduct(id, req.Name, req.Type, req.Description, req.WelcomeMessage)
+			p, err := app.UpdateProduct(id, req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload)
 			if err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return

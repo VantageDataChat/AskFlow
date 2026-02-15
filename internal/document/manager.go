@@ -1105,6 +1105,26 @@ func (dm *DocumentManager) saveExtractedImage(data []byte) (string, error) {
 	return "/api/images/" + filename, nil
 }
 
+// GetDocumentInfo returns metadata for a single document by ID.
+func (dm *DocumentManager) GetDocumentInfo(docID string) (*DocumentInfo, error) {
+	var d DocumentInfo
+	var errStr sql.NullString
+	var createdAt sql.NullTime
+	err := dm.db.QueryRow(
+		"SELECT id, name, type, status, error, created_at, COALESCE(product_id, '') FROM documents WHERE id = ?", docID,
+	).Scan(&d.ID, &d.Name, &d.Type, &d.Status, &errStr, &createdAt, &d.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("document not found: %w", err)
+	}
+	if errStr.Valid {
+		d.Error = errStr.String
+	}
+	if createdAt.Valid {
+		d.CreatedAt = createdAt.Time
+	}
+	return &d, nil
+}
+
 // GetFilePath returns the path to the original uploaded file for a document.
 // Returns empty string if the file doesn't exist.
 func (dm *DocumentManager) GetFilePath(docID string) (string, string, error) {
