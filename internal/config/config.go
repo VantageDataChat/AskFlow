@@ -41,6 +41,7 @@ type Config struct {
 
 // ServerConfig holds HTTP server configuration.
 type ServerConfig struct {
+	Bind    string `json:"bind"`    // bind address (e.g., "0.0.0.0", "::", "127.0.0.1")
 	Port    int    `json:"port"`
 	SSLCert string `json:"ssl_cert"` // path to SSL certificate file (PEM)
 	SSLKey  string `json:"ssl_key"`  // path to SSL private key file (PEM)
@@ -157,6 +158,7 @@ func NewConfigManagerWithKey(configPath string, key []byte) (*ConfigManager, err
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
+			Bind: "0.0.0.0",
 			Port: 8080,
 		},
 		LLM: LLMConfig{
@@ -630,6 +632,12 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 		cm.config.Video.MaxUploadSizeMB = n
 
 	// Server fields
+	case "server.bind":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.Server.Bind = s
 	case "server.port":
 		n, err := toInt(val)
 		if err != nil {
@@ -743,6 +751,9 @@ func (cm *ConfigManager) DeleteOAuthProvider(provider string) error {
 // applyDefaults fills in zero-value fields with defaults.
 func (cm *ConfigManager) applyDefaults(cfg *Config) {
 	defaults := DefaultConfig()
+	if cfg.Server.Bind == "" {
+		cfg.Server.Bind = defaults.Server.Bind
+	}
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = defaults.Server.Port
 	}

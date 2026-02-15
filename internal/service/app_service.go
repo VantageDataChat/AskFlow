@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"helpdesk/internal/auth"
@@ -47,7 +48,8 @@ type AppService struct {
 
 // Initialize sets up all services and prepares the application for running.
 // The dataDir parameter specifies the root data directory.
-func (as *AppService) Initialize(dataDir string) error {
+// overrideBind and overridePort can be used to bypass settings in the config file.
+func (as *AppService) Initialize(dataDir string, overrideBind string, overridePort int) error {
 	as.dataDir = dataDir
 
 	// 1. Ensure data directory exists
@@ -125,8 +127,23 @@ func (as *AppService) Initialize(dataDir string) error {
 	})
 
 	// 5. Create HTTP server
+	bind := as.cfg.Server.Bind
+	if overrideBind != "" {
+		bind = overrideBind
+	}
+	port := as.cfg.Server.Port
+	if overridePort > 0 {
+		port = overridePort
+	}
+
+	// Format address correctly for IPv6
+	addr := fmt.Sprintf("%s:%d", bind, port)
+	if strings.Contains(bind, ":") && !strings.HasPrefix(bind, "[") {
+		addr = fmt.Sprintf("[%s]:%d", bind, port)
+	}
+
 	as.server = &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", as.cfg.Server.Port),
+		Addr:              addr,
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      600 * time.Second,

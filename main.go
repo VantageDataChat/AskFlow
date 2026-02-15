@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,11 +110,57 @@ func parseDataDirFlag() string {
 	return "./data"
 }
 
+// parsePortFlag extracts the --port or -p flag from command line arguments.
+func parsePortFlag() int {
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, "--port=") {
+			port, err := strconv.Atoi(strings.TrimPrefix(arg, "--port="))
+			if err == nil {
+				return port
+			}
+		}
+		if (arg == "--port" || arg == "-p") && i+1 < len(os.Args) {
+			port, err := strconv.Atoi(os.Args[i+1])
+			if err == nil {
+				return port
+			}
+		}
+	}
+	return 0
+}
+
+// parseBindFlag extracts the --bind flag or IP version shorthands (-4/-6) from command line arguments.
+func parseBindFlag() string {
+	// Check --bind first
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, "--bind=") {
+			return strings.TrimPrefix(arg, "--bind=")
+		}
+		if arg == "--bind" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+
+	// Check for shorthand IP version flags
+	for _, arg := range os.Args {
+		if arg == "-4" || arg == "--ipv4" {
+			return "0.0.0.0"
+		}
+		if arg == "-6" || arg == "--ipv6" {
+			return "::"
+		}
+	}
+	return ""
+}
+
 // runAsConsoleApp runs the application in console mode.
 func runAsConsoleApp(dataDir string) {
+	bind := parseBindFlag()
+	port := parsePortFlag()
+
 	// Initialize application service
 	appSvc := &service.AppService{}
-	if err := appSvc.Initialize(dataDir); err != nil {
+	if err := appSvc.Initialize(dataDir, bind, port); err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
 
@@ -135,7 +182,7 @@ func runAsConsoleApp(dataDir string) {
 // runCLICommand initializes the app service and runs a CLI command.
 func runCLICommand(dataDir string, fn func(*service.AppService)) {
 	appSvc := &service.AppService{}
-	if err := appSvc.Initialize(dataDir); err != nil {
+	if err := appSvc.Initialize(dataDir, "", 0); err != nil {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
 	defer appSvc.GetDatabase().Close()
@@ -159,71 +206,76 @@ func createApp(appSvc *service.AppService) *App {
 
 // printUsage prints CLI usage information.
 func printUsage() {
-	fmt.Println(`用法:
-  helpdesk                                        启动 HTTP 服务（默认端口 8080）
-  helpdesk --datadir=<path>                        指定数据目录
+	fmt.Println(`Usage:
+  helpdesk                                        Start HTTP service (default port 8080)
+  helpdesk --bind=<addr>                          Specify listen address (e.g., 0.0.0.0, ::, 127.0.0.1)
+  helpdesk -4, --ipv4                             Listen on IPv4 only (equivalent to --bind=0.0.0.0)
+  helpdesk -6, --ipv6                             Listen on IPv6 (equivalent to --bind=::)
+  helpdesk --port=<port>                          Specify service port (or -p <port>)
+  helpdesk --datadir=<path>                       Specify data directory
 
-Windows 服务命令:
-  helpdesk install [--datadir=<path>]              安装为 Windows 服务
-  helpdesk remove                                  卸载 Windows 服务
-  helpdesk start                                   启动 Windows 服务
-  helpdesk stop                                    停止 Windows 服务
+Windows Service Commands:
+  helpdesk install [-4|-6] [--bind=<addr>] [--port=<port>]  Install as Windows service
+  helpdesk remove                                           Uninstall Windows service
+  helpdesk start                                            Start Windows service
+  helpdesk stop                                             Stop Windows service
 
-CLI 命令:
+CLI Commands:
   helpdesk import [--product <product_id>] <目录> [...]  批量��入目录下的文档到知识库
-  helpdesk products                                列出所有产品及产品 ID
-  helpdesk backup [选项]                           备份整站数据
-  helpdesk restore <备份文件>                       从备份恢复数据
-  helpdesk help                                   显示此帮助信息
+  helpdesk products                                         List all products and their IDs
+  helpdesk backup [options]                                 Backup all system data
+  helpdesk restore <backup_file>                            Restore data from backup
+  helpdesk help                                             Show this help information
 
-import 命令:
-  递归扫描指定目录及子目录，将支持的文件（PDF、Word、Excel、PPT、Markdown、HTML）
-  解析后存入向量数据库。可同时指定多个目录。
+import command:
+  Recursively scan specified directories and subdirectories for supported files
+  (PDF, Word, Excel, PPT, Markdown, HTML), parse them, and store in vector database.
+  Multiple directories can be specified.
 
-  选项:
-    --product <product_id>  指定目标产品 ID，导入的文档将关联到该产品。
-                            如果不指定，文档将导入到公共库。
+  Options:
+    --product <product_id>  Specify target product ID. Imported documents will be associated
+                            with this product. If not specified, they will be imported to the public library.
 
-  支持的文件格式: .pdf .doc .docx .xls .xlsx .ppt .pptx .md .markdown .html .htm
+  Supported formats: .pdf .doc .docx .xls .xlsx .ppt .pptx .md .markdown .html .htm
 
-  示例:
+  Examples:
     helpdesk import ./docs
     helpdesk import ./docs ./manuals /path/to/files
     helpdesk import --product abc123 ./docs
 
-products 命令:
-  列出系统中所有产品的 ID、名称和描述，方便在 import 等命令中使用产品 ID。
+products command:
+  List all products' IDs, names, and descriptions in the system.
 
-  示例:
+  Example:
     helpdesk products
 
-backup 命令:
-  将整站数据按类型分层备份为 tar.gz 归档。
-  全量模式: 完整数据库快照 + 全部上传文件 + 配置
-  增量模式: 仅导出新增数据库行 + 新上传文件 + 配置（可变表全量导出）
+backup command:
+  Backup all system data into a tiered tar.gz archive.
+  Full mode: Complete database snapshot + all uploaded files + configuration.
+  Incremental mode: Export only new database rows + new uploaded files + configuration.
 
-  备份文件命名: helpdesk_<模式>_<主机名>_<日期-时间>.tar.gz
-  例如: helpdesk_full_myserver_20260212-143000.tar.gz
+  Backup filename: helpdesk_<mode>_<hostname>_<date-time>.tar.gz
+  Example: helpdesk_full_myserver_20260212-143000.tar.gz
 
-  选项:
-    --output <目录>    备份文件输出目录（默认当前目录）
-    --incremental      增量备份模式
-    --base <manifest>  增量备份的基准 manifest 文件路径（增量模式必需）
+  Options:
+    --output <dir>     Output directory for backup file (default: current directory)
+    --incremental      Incremental backup mode
+    --base <manifest>  Path to base manifest file (required for incremental mode)
 
-  示例:
-    helpdesk backup                                    全量备份到当前目录
-    helpdesk backup --output ./backups                 全量备份到指定目录
+  Examples:
+    helpdesk backup                                    Full backup to current directory
+    helpdesk backup --output ./backups                 Full backup to specified directory
     helpdesk backup --incremental --base ./backups/helpdesk_full_myserver_20260212-143000.manifest.json
 
-restore 命令:
-  从备份归档恢复数据到 data 目录。
-  全量恢复: 直接解压即可运行
-  增量恢复: 先恢复全量备份，再依次应用增量备份的 db_delta.sql
+restore command:
+  Restore data from a backup archive to the data directory.
+  Full restore: Extract and run directly.
+  Incremental restore: Restore full backup first, then apply db_delta.sql from incremental backups.
 
-  选项:
-    --target <目录>    恢复目标目录（默认 ./data）
+  Options:
+    --target <dir>     Target restore directory (default: ./data)
 
-  示例:
+  Examples:
     helpdesk restore helpdesk_full_myserver_20260212-143000.tar.gz
     helpdesk restore --target ./data-new backup.tar.gz`)
 }

@@ -27,6 +27,8 @@ func isWindowsService() bool {
 // handleInstall installs the Windows service.
 func handleInstall(args []string) {
 	dataDir := parseDataDirFlag()
+	bind := parseBindFlag()
+	port := parsePortFlag()
 	exePath, err := os.Executable()
 	if err != nil {
 		log.Fatalf("Failed to get executable path: %v", err)
@@ -37,6 +39,12 @@ func handleInstall(args []string) {
 	if dataDir != "./data" {
 		serviceArgs = append(serviceArgs, "--datadir="+dataDir)
 	}
+	if bind != "" {
+		serviceArgs = append(serviceArgs, "--bind="+bind)
+	}
+	if port > 0 {
+		serviceArgs = append(serviceArgs, fmt.Sprintf("--port=%d", port))
+	}
 
 	err = helpdeskSvc.InstallService(serviceName, displayName, description, exePath, serviceArgs)
 	if err != nil {
@@ -46,6 +54,12 @@ func handleInstall(args []string) {
 	fmt.Println("✓ Service installed successfully")
 	if dataDir != "./data" {
 		fmt.Printf("  Data directory: %s\n", dataDir)
+	}
+	if bind != "" {
+		fmt.Printf("  Bind address: %s\n", bind)
+	}
+	if port > 0 {
+		fmt.Printf("  Port: %d\n", port)
 	}
 	fmt.Println("\nTo start the service, run:")
 	fmt.Println("  helpdesk start")
@@ -88,9 +102,12 @@ func runAsService(dataDir string) {
 	}
 	defer logger.Close()
 
+	port := parsePortFlag()
+	bind := parseBindFlag()
+
 	// Initialize application service
 	appSvc := &service.AppService{}
-	if err := appSvc.Initialize(dataDir); err != nil {
+	if err := appSvc.Initialize(dataDir, bind, port); err != nil {
 		logger.Error("Failed to initialize application: %v", err)
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
