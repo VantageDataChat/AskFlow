@@ -374,7 +374,12 @@ func runBatchImport(args []string, dm *document.DocumentManager, ps *product.Pro
 
 	fmt.Printf("找到 %d 个文件，开始导入...\n\n", len(files))
 
+	type failedFile struct {
+		Path   string
+		Reason string
+	}
 	var success, failed int
+	var failedFiles []failedFile
 	for i, filePath := range files {
 		fileName := filepath.Base(filePath)
 		ext := strings.ToLower(filepath.Ext(fileName))
@@ -384,8 +389,10 @@ func runBatchImport(args []string, dm *document.DocumentManager, ps *product.Pro
 
 		fileData, err := os.ReadFile(filePath)
 		if err != nil {
-			fmt.Printf("读取失败: %v\n", err)
+			reason := fmt.Sprintf("读取失败: %v", err)
+			fmt.Println(reason)
 			failed++
+			failedFiles = append(failedFiles, failedFile{Path: filePath, Reason: reason})
 			continue
 		}
 
@@ -397,13 +404,17 @@ func runBatchImport(args []string, dm *document.DocumentManager, ps *product.Pro
 		}
 		doc, err := dm.UploadFile(req)
 		if err != nil {
-			fmt.Printf("导入失败: %v\n", err)
+			reason := fmt.Sprintf("导入失败: %v", err)
+			fmt.Println(reason)
 			failed++
+			failedFiles = append(failedFiles, failedFile{Path: filePath, Reason: reason})
 			continue
 		}
 		if doc.Status == "failed" {
-			fmt.Printf("处理失败: %s\n", doc.Error)
+			reason := fmt.Sprintf("处理失败: %s", doc.Error)
+			fmt.Println(reason)
 			failed++
+			failedFiles = append(failedFiles, failedFile{Path: filePath, Reason: reason})
 			continue
 		}
 
@@ -411,7 +422,21 @@ func runBatchImport(args []string, dm *document.DocumentManager, ps *product.Pro
 		success++
 	}
 
-	fmt.Printf("\n导入完成: 成功 %d, 失败 %d, 共 %d\n", success, failed, len(files))
+	fmt.Println("\n========== 导入报告 ==========")
+	fmt.Printf("总文件数: %d\n", len(files))
+	fmt.Printf("成功文件数: %d\n", success)
+	fmt.Printf("失败文件数: %d\n", failed)
+	if len(failedFiles) > 0 {
+		fmt.Println("\n失败文件列表:")
+		for _, f := range failedFiles {
+			absPath, err := filepath.Abs(f.Path)
+			if err != nil {
+				absPath = f.Path
+			}
+			fmt.Printf("  %s\n    原因: %s\n", absPath, f.Reason)
+		}
+	}
+	fmt.Println("==============================")
 }
 
 // runBackup executes a full or incremental backup of the data directory.
