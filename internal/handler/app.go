@@ -25,6 +25,7 @@ import (
 	"askflow/internal/email"
 	"askflow/internal/embedding"
 	"askflow/internal/errlog"
+	"askflow/internal/faq"
 	"askflow/internal/llm"
 	"askflow/internal/pending"
 	"askflow/internal/product"
@@ -48,6 +49,7 @@ type App struct {
 	configManager  *config.ConfigManager
 	emailService   *email.Service
 	productService *product.ProductService
+	faqService     *faq.Service
 	loginLimiter   *auth.LoginLimiter
 }
 
@@ -63,6 +65,7 @@ func NewApp(
 	cm *config.ConfigManager,
 	es *email.Service,
 	ps *product.ProductService,
+	fs *faq.Service,
 ) *App {
 	return &App{
 		db:             writeDB,
@@ -75,6 +78,7 @@ func NewApp(
 		configManager:  cm,
 		emailService:   es,
 		productService: ps,
+		faqService:     fs,
 		loginLimiter:   auth.NewLoginLimiterRW(readDB, writeDB),
 	}
 }
@@ -1445,6 +1449,63 @@ func (a *App) GetUserDefaultProduct(userID string) (string, error) {
 func (a *App) SetUserDefaultProduct(userID, productID string) error {
 	_, err := a.db.Exec(`UPDATE users SET default_product_id = ? WHERE id = ?`, productID, userID)
 	return err
+}
+
+// --- FAQ Interface ---
+
+// RecordFAQ records a user question for FAQ weight tracking.
+func (a *App) RecordFAQ(productID, question string) {
+	if a.faqService != nil {
+		_ = a.faqService.RecordQuestion(productID, question)
+	}
+}
+
+// ListFAQ returns the top 20 FAQ entries for a product (public).
+func (a *App) ListFAQ(productID string) ([]faq.Entry, error) {
+	if a.faqService == nil {
+		return nil, nil
+	}
+	return a.faqService.TopFAQ(productID, 20)
+}
+
+// ListAllFAQ returns all FAQ entries for a product (admin).
+func (a *App) ListAllFAQ(productID string) ([]faq.Entry, error) {
+	if a.faqService == nil {
+		return nil, nil
+	}
+	return a.faqService.ListAll(productID)
+}
+
+// CreateFAQ manually creates a FAQ entry.
+func (a *App) CreateFAQ(productID, question string) (*faq.Entry, error) {
+	if a.faqService == nil {
+		return nil, fmt.Errorf("FAQ service not available")
+	}
+	return a.faqService.Create(productID, question)
+}
+
+// DeleteFAQ removes a FAQ entry by ID.
+func (a *App) DeleteFAQ(id string) error {
+	if a.faqService == nil {
+		return fmt.Errorf("FAQ service not available")
+	}
+	return a.faqService.Delete(id)
+}
+
+// UpdateFAQ updates a FAQ entry's question text.
+func (a *App) UpdateFAQ(id, question string) error {
+	if a.faqService == nil {
+		return fmt.Errorf("FAQ service not available")
+	}
+	return a.faqService.UpdateQuestion(id, question)
+}
+
+// ReorderFAQ updates the sort order of FAQ entries.
+func (a *App) ReorderFAQ(ids []string) error {
+	if a.faqService == nil {
+		return fmt.Errorf("FAQ service not available")
+	}
+	return a.faqService.Reorder(ids)
 }
 
 // --- Customer Management ---

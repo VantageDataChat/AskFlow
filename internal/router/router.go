@@ -144,6 +144,12 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/products/", secure(handler.HandleProductByID(app)))
 	http.HandleFunc("/api/products", secure(handler.HandleProducts(app)))
 
+	// ── FAQ ──
+	http.HandleFunc("/api/faq", secure(handler.HandleFAQ(app)))
+	http.HandleFunc("/api/admin/faq/reorder", secure(handler.HandleFAQAdminReorder(app)))
+	http.HandleFunc("/api/admin/faq/", secure(handler.HandleFAQAdminByID(app)))
+	http.HandleFunc("/api/admin/faq", secure(handler.HandleFAQAdminList(app)))
+
 	// ── Knowledge ──
 	http.HandleFunc("/api/knowledge", secure(handler.HandleKnowledgeEntry(app)))
 

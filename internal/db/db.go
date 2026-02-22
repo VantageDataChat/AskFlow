@@ -119,6 +119,11 @@ func InitDB(dbPath string) (*DBPair, error) {
 		return nil, fmt.Errorf("failed to create login_attempts table: %w", err)
 	}
 
+	if err := createFAQTable(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create faq table: %w", err)
+	}
+
 	if err := createIndexes(writeDB); err != nil {
 		cleanup()
 		return nil, err
@@ -365,6 +370,21 @@ func createLoginAttemptsTable(db *sql.DB) error {
 	return err
 }
 
+// createFAQTable creates the faq_entries table for tracking frequently asked questions.
+func createFAQTable(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS faq_entries (
+		id         TEXT PRIMARY KEY,
+		product_id TEXT NOT NULL,
+		question   TEXT NOT NULL,
+		normalized TEXT NOT NULL,
+		weight     INTEGER NOT NULL DEFAULT 1,
+		sort_order INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`)
+	return err
+}
+
 // createIndexes adds indexes for frequently queried columns.
 // Called after migrations to ensure all columns exist.
 func createIndexes(db *sql.DB) error {
@@ -391,6 +411,10 @@ func createIndexes(db *sql.DB) error {
 		// login_bans: covering index for ban lookups by username/ip + expiry
 		`CREATE INDEX IF NOT EXISTS idx_login_bans_username_unlocks ON login_bans(username, unlocks_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_login_bans_ip_unlocks ON login_bans(ip, unlocks_at)`,
+
+		// FAQ indexes
+		`CREATE INDEX IF NOT EXISTS idx_faq_entries_product_weight ON faq_entries(product_id, weight DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_faq_entries_product_normalized ON faq_entries(product_id, normalized)`,
 	}
 	for _, idx := range indexes {
 		if _, err := db.Exec(idx); err != nil {
@@ -441,7 +465,7 @@ func columnExists(db *sql.DB, table, column string) bool {
 		"pending_questions": true, "sessions": true,
 		"email_tokens": true, "admin_users": true,
 		"products": true, "admin_user_products": true,
-		"video_segments": true,
+		"video_segments": true, "faq_entries": true,
 	}
 	if !validTables[table] {
 		return false

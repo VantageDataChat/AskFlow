@@ -2142,6 +2142,7 @@
         if (tab === 'bans') loadLoginBans();
         if (tab === 'customers') { loadAdminCustomers(); i18n.applyI18nToPage(); }
         if (tab === 'batchimport') { loadBatchImportProductSelector(); }
+        if (tab === 'faq') { loadFAQAdminProductSelector(); }
     };
 
     // --- Settings Sub-Tab Switching ---
@@ -5507,6 +5508,234 @@
         document.addEventListener('DOMContentLoaded', init);
     } else {
         init();
+    }
+
+    // --- FAQ Feature ---
+
+    // Chat FAQ panel
+    window.toggleFAQPanel = function () {
+        var panel = document.getElementById('faq-panel');
+        if (!panel) return;
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+            loadChatFAQ();
+        } else {
+            panel.classList.add('hidden');
+        }
+    };
+
+    function loadChatFAQ() {
+        var productID = localStorage.getItem('askflow_product_id') || '';
+        var url = '/api/faq' + (productID ? '?product_id=' + encodeURIComponent(productID) : '');
+        var token = getChatToken();
+        fetch(url, { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                renderChatFAQList(data.faqs || []);
+            })
+            .catch(function () {
+                renderChatFAQList([]);
+            });
+    }
+
+    function renderChatFAQList(faqs) {
+        var container = document.getElementById('faq-panel-list');
+        if (!container) return;
+        if (!faqs || faqs.length === 0) {
+            container.innerHTML = '<p class="faq-empty">暂无常见问题</p>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < faqs.length; i++) {
+            html += '<button class="faq-item" onclick="askFAQ(this)" data-question="' + escapeHtml(faqs[i].question) + '">' +
+                '<span class="faq-item-num">' + (i + 1) + '</span>' +
+                '<span class="faq-item-text">' + escapeHtml(faqs[i].question) + '</span>' +
+            '</button>';
+        }
+        container.innerHTML = html;
+    }
+
+    window.askFAQ = function (el) {
+        var question = el.getAttribute('data-question');
+        if (!question) return;
+        var panel = document.getElementById('faq-panel');
+        if (panel) panel.classList.add('hidden');
+        var input = document.getElementById('chat-input');
+        if (input) {
+            input.value = question;
+            input.dispatchEvent(new Event('input'));
+        }
+        window.sendChatMessage();
+    };
+
+    // Admin FAQ management
+    function loadFAQAdminProductSelector() {
+        adminFetch('/api/products')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var sel = document.getElementById('faq-admin-product-select');
+                if (!sel) return;
+                var products = data.products || [];
+                sel.innerHTML = '';
+                for (var i = 0; i < products.length; i++) {
+                    var opt = document.createElement('option');
+                    opt.value = products[i].id;
+                    opt.textContent = products[i].name;
+                    sel.appendChild(opt);
+                }
+                if (products.length > 0) loadAdminFAQ();
+            });
+    }
+
+    window.loadAdminFAQ = function () {
+        var sel = document.getElementById('faq-admin-product-select');
+        var productID = sel ? sel.value : '';
+        if (!productID) return;
+        adminFetch('/api/admin/faq?product_id=' + encodeURIComponent(productID))
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                renderAdminFAQList(data.faqs || []);
+            })
+            .catch(function () {
+                renderAdminFAQList([]);
+            });
+    };
+
+    function renderAdminFAQList(faqs) {
+        var container = document.getElementById('faq-admin-list');
+        if (!container) return;
+        if (!faqs || faqs.length === 0) {
+            container.innerHTML = '<p class="admin-table-empty">暂无FAQ</p>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < faqs.length; i++) {
+            var f = faqs[i];
+            html += '<div class="faq-admin-item" draggable="true" data-id="' + escapeHtml(f.id) + '">' +
+                '<span class="faq-admin-drag">☰</span>' +
+                '<span class="faq-admin-order">' + (i + 1) + '</span>' +
+                '<span class="faq-admin-question">' + escapeHtml(f.question) + '</span>' +
+                '<span class="faq-admin-weight" title="权重">(' + f.weight + ')</span>' +
+                '<button class="btn-primary btn-sm" onclick="editAdminFAQ(\'' + escapeHtml(f.id) + '\', this)">编辑</button>' +
+                '<button class="btn-danger btn-sm" onclick="deleteAdminFAQ(\'' + escapeHtml(f.id) + '\')">删除</button>' +
+            '</div>';
+        }
+        container.innerHTML = html;
+        initFAQDragSort(container);
+    }
+
+    window.createAdminFAQ = function () {
+        var sel = document.getElementById('faq-admin-product-select');
+        var input = document.getElementById('faq-new-question');
+        var productID = sel ? sel.value : '';
+        var question = input ? input.value.trim() : '';
+        if (!productID || !question) {
+            showAdminToast('请选择产品并输入问题', 'error');
+            return;
+        }
+        adminFetch('/api/admin/faq', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: productID, question: question })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '添加失败'); });
+            return res.json();
+        })
+        .then(function () {
+            showAdminToast('FAQ已添加', 'success');
+            if (input) input.value = '';
+            loadAdminFAQ();
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || '添加失败', 'error');
+        });
+    };
+
+    window.editAdminFAQ = function (id, btn) {
+        var item = btn.closest('.faq-admin-item');
+        var qSpan = item.querySelector('.faq-admin-question');
+        var oldText = qSpan.textContent;
+        var newText = prompt('编辑问题:', oldText);
+        if (newText === null || newText.trim() === '' || newText.trim() === oldText) return;
+        adminFetch('/api/admin/faq/' + encodeURIComponent(id), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: newText.trim() })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '编辑失败'); });
+            showAdminToast('已更新', 'success');
+            loadAdminFAQ();
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || '编辑失败', 'error');
+        });
+    };
+
+    window.deleteAdminFAQ = function (id) {
+        if (!confirm('确定删除该FAQ？')) return;
+        adminFetch('/api/admin/faq/' + encodeURIComponent(id), { method: 'DELETE' })
+            .then(function (res) {
+                if (!res.ok) throw new Error('删除失败');
+                showAdminToast('已删除', 'success');
+                loadAdminFAQ();
+            })
+            .catch(function (err) {
+                showAdminToast(err.message || '删除失败', 'error');
+            });
+    };
+
+    function initFAQDragSort(container) {
+        var dragItem = null;
+        var items = container.querySelectorAll('.faq-admin-item');
+        items.forEach(function (item) {
+            item.addEventListener('dragstart', function (e) {
+                dragItem = item;
+                item.classList.add('faq-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            item.addEventListener('dragend', function () {
+                item.classList.remove('faq-dragging');
+                dragItem = null;
+                saveFAQOrder(container);
+            });
+            item.addEventListener('dragover', function (e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragItem && dragItem !== item) {
+                    var rect = item.getBoundingClientRect();
+                    var mid = rect.top + rect.height / 2;
+                    if (e.clientY < mid) {
+                        container.insertBefore(dragItem, item);
+                    } else {
+                        container.insertBefore(dragItem, item.nextSibling);
+                    }
+                }
+            });
+        });
+    }
+
+    function saveFAQOrder(container) {
+        var items = container.querySelectorAll('.faq-admin-item');
+        var ids = [];
+        items.forEach(function (item, idx) {
+            ids.push(item.getAttribute('data-id'));
+            var orderSpan = item.querySelector('.faq-admin-order');
+            if (orderSpan) orderSpan.textContent = idx + 1;
+        });
+        adminFetch('/api/admin/faq/reorder', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ids })
+        })
+        .then(function (res) {
+            if (!res.ok) throw new Error('排序失败');
+            showAdminToast('排序已保存', 'success');
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || '排序失败', 'error');
+        });
     }
 
 })();

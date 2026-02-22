@@ -22,6 +22,7 @@ import (
 	"askflow/internal/email"
 	"askflow/internal/embedding"
 	"askflow/internal/errlog"
+	"askflow/internal/faq"
 	"askflow/internal/fontcheck"
 	"askflow/internal/handler"
 	"askflow/internal/llm"
@@ -45,6 +46,7 @@ type AppService struct {
 	oauthClient     *auth.OAuthClient
 	emailService    *email.Service
 	productService  *product.ProductService
+	faqService      *faq.Service
 	cfg             *config.Config
 	dataDir         string
 	sessionCleanup  chan struct{}
@@ -139,6 +141,7 @@ func (as *AppService) Initialize(dataDir string, overrideBind string, overridePo
 	}
 
 	as.productService = product.NewProductService(readDB, writeDB)
+	as.faqService = faq.NewService(readDB, writeDB)
 	as.queryEngine = query.NewQueryEngine(es, vs, ls, writeDB, readDB, as.cfg)
 	as.pendingManager = pending.NewPendingQuestionManager(writeDB, tc, es, vs, ls)
 	as.oauthClient = auth.NewOAuthClient(as.cfg.OAuth.Providers)
@@ -303,6 +306,7 @@ func (as *AppService) CreateApp() *handler.App {
 		as.configManager,
 		as.emailService,
 		as.productService,
+		as.faqService,
 	)
 }
 

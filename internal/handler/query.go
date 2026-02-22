@@ -57,6 +57,8 @@ func HandleQuery(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusInternalServerError, "查询处理失败，请稍后重试")
 			return
 		}
+		// Record question for FAQ weight tracking (async, non-blocking)
+		go app.RecordFAQ(req.ProductID, req.Question)
 		// Strip debug info for non-admin users to prevent information leakage
 		if resp.DebugInfo != nil {
 			_, _, adminErr := GetAdminSession(app, r)

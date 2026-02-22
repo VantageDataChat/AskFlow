@@ -3362,8 +3362,8 @@ a.chat-source-download:hover {
     width: 340px;
     max-width: 90vw;
     background: #fff;
-    border-left: 1px solid #e5e7eb;
-    box-shadow: -4px 0 24px rgba(0,0,0,0.08);
+    border-left: 1px solid #DBEAFE;
+    box-shadow: -4px 0 24px rgba(37,99,235,0.1);
     z-index: 50;
     display: flex;
     flex-direction: column;
@@ -3381,14 +3381,14 @@ a.chat-source-download:hover {
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    border-bottom: 1px solid #e5e7eb;
-    background: #f9fafb;
+    border-bottom: 1px solid #DBEAFE;
+    background: linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%);
 }
 .faq-panel-header h3 {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
-    color: #1f2937;
+    color: #1E40AF;
 }
 .faq-panel-close {
     background: none;
@@ -3422,20 +3422,21 @@ a.chat-source-download:hover {
     width: 100%;
     padding: 10px 12px;
     margin-bottom: 4px;
-    background: #f3f4f6;
+    background: #EFF6FF;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     text-align: left;
     font-size: 0.88rem;
     color: #374151;
-    transition: background 0.15s, border-color 0.15s;
+    transition: all 0.15s;
     line-height: 1.45;
 }
 .faq-item:hover {
-    background: #e0e7ff;
-    border-color: #818cf8;
-    color: #1e40af;
+    background: #DBEAFE;
+    border-color: #93C5FD;
+    color: #1E40AF;
+    transform: translateX(2px);
 }
 .faq-item-num {
     flex-shrink: 0;
@@ -3465,21 +3466,22 @@ a.chat-source-download:hover {
     gap: 8px;
     padding: 8px 10px;
     margin-bottom: 4px;
-    background: #f9fafb;
-    border: 1px solid #e5e7eb;
-    border-radius: 6px;
-    transition: box-shadow 0.15s, background 0.15s;
+    background: #F8FAFF;
+    border: 1px solid #DBEAFE;
+    border-radius: 10px;
+    transition: all 0.15s;
     cursor: grab;
 }
 .faq-admin-item:hover {
-    background: #f3f4f6;
+    background: #EFF6FF;
+    box-shadow: 0 2px 8px rgba(37,99,235,0.06);
 }
 .faq-admin-item.faq-dragging {
     opacity: 0.5;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    box-shadow: 0 4px 16px rgba(37,99,235,0.15);
 }
 .faq-admin-drag {
-    color: #9ca3af;
+    color: #93C5FD;
     cursor: grab;
     font-size: 1.1rem;
     user-select: none;
@@ -3490,7 +3492,7 @@ a.chat-source-download:hover {
     text-align: center;
     font-size: 0.8rem;
     font-weight: 600;
-    color: #6b7280;
+    color: #2563EB;
 }
 .faq-admin-question {
     flex: 1;
