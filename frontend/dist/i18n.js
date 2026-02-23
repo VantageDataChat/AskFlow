@@ -10,7 +10,7 @@
     var translations = {
         'zh-CN': {
             // Page title
-            'site_title': '软件自助服务平台',
+            'site_title': 'Askflow客户自服务系统',
 
             // Setup page (system not configured)
             'setup_title': '系统启动准备中',
@@ -19,7 +19,7 @@
             'setup_refresh': '刷新页面',
 
             // Login page
-            'login_title': '软件自助服务平台',
+            'login_title': 'Askflow客户自服务系统',
             'login_subtitle': '登录您的账号',
             'login_email': '邮箱',
             'login_password': '密码',
@@ -108,7 +108,7 @@
             'admin_login_retry': '登录失败，请重试',
 
             // Chat page
-            'chat_title': '软件自助服务平台',
+            'chat_title': 'Askflow客户自服务系统',
             'chat_login_btn': '登录',
             'chat_logout_btn': '退出登录',
             'chat_all_products': '全部产品',
@@ -654,7 +654,7 @@
 
         'en-US': {
             // Page title
-            'site_title': 'Software Self-Service Platform',
+            'site_title': 'Askflow Customer Self-Service',
 
             // Setup page (system not configured)
             'setup_title': 'System Preparing',
@@ -663,7 +663,7 @@
             'setup_refresh': 'Refresh Page',
 
             // Login page
-            'login_title': 'Software Self-Service Platform',
+            'login_title': 'Askflow Customer Self-Service',
             'login_subtitle': 'Sign in to your account',
             'login_email': 'Email',
             'login_password': 'Password',
@@ -752,7 +752,7 @@
             'admin_login_retry': 'Login failed, please try again',
 
             // Chat page
-            'chat_title': 'Software Self-Service Platform',
+            'chat_title': 'Askflow Customer Self-Service',
             'chat_login_btn': 'Sign In',
             'chat_logout_btn': 'Sign Out',
             'chat_all_products': 'All Products',
