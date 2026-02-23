@@ -2513,6 +2513,17 @@ a.chat-source-download:hover {
     position: relative;
 }
 
+/* Admin login page: card is the only child of login-container (no brand side),
+   so widen it to avoid a narrow-tall phone-like appearance on desktop. */
+#page-admin-login .login-card {
+    max-width: 480px;
+    padding: 2.5rem 2.5rem 2rem;
+}
+
+#page-admin-login .login-container {
+    align-items: center;
+}
+
 /* Multimodal / Video settings */
 .admin-dep-status {
     display: flex;
