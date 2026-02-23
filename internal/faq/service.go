@@ -138,9 +138,9 @@ func (s *Service) findSimilarByEmbedding(productID, question string) string {
 		return ""
 	}
 
-	// Load existing entries with their cached embeddings
+	// Load existing entries with their cached embeddings (cap scan to prevent unbounded memory use)
 	rows, err := s.readDB.Query(
-		`SELECT id, question, embedding FROM faq_entries WHERE product_id = ?`,
+		`SELECT id, question, embedding FROM faq_entries WHERE product_id = ? ORDER BY weight DESC LIMIT 500`,
 		productID,
 	)
 	if err != nil {
@@ -238,11 +238,22 @@ func (s *Service) Create(productID, question string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Pre-compute embedding for the new entry
+	var embVal sql.NullString
+	if s.embedFn != nil {
+		if vec, embErr := s.embedFn(question); embErr == nil && len(vec) > 0 {
+			if data, jErr := json.Marshal(vec); jErr == nil {
+				embVal = sql.NullString{String: string(data), Valid: true}
+			}
+		}
+	}
+
 	now := time.Now()
 	_, err = s.writeDB.Exec(
-		`INSERT INTO faq_entries (id, product_id, question, normalized, weight, sort_order, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 2, ?, ?, ?)`,
-		id, productID, question, normalized, maxOrder+1, now, now,
+		`INSERT INTO faq_entries (id, product_id, question, normalized, weight, sort_order, embedding, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 2, ?, ?, ?, ?)`,
+		id, productID, question, normalized, maxOrder+1, embVal, now, now,
 	)
 	if err != nil {
 		return nil, err
@@ -322,15 +333,27 @@ func (s *Service) Delete(id string) error {
 }
 
 // UpdateQuestion updates the display question text for a FAQ entry (admin operation).
+// Also recomputes the cached embedding if embedding is configured.
 func (s *Service) UpdateQuestion(id, question string) error {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return fmt.Errorf("question cannot be empty")
 	}
 	normalized := normalizeQuestion(question)
+
+	// Recompute embedding for the updated question text
+	var embVal sql.NullString
+	if s.embedFn != nil {
+		if vec, err := s.embedFn(question); err == nil && len(vec) > 0 {
+			if data, err := json.Marshal(vec); err == nil {
+				embVal = sql.NullString{String: string(data), Valid: true}
+			}
+		}
+	}
+
 	_, err := s.writeDB.Exec(
-		`UPDATE faq_entries SET question = ?, normalized = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		question, normalized, id,
+		`UPDATE faq_entries SET question = ?, normalized = ?, embedding = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		question, normalized, embVal, id,
 	)
 	return err
 }

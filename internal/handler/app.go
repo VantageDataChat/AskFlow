@@ -1455,8 +1455,15 @@ func (a *App) SetUserDefaultProduct(userID, productID string) error {
 
 // RecordFAQ records a user question for FAQ weight tracking.
 func (a *App) RecordFAQ(productID, question string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[FAQ] panic in RecordFAQ: %v", r)
+		}
+	}()
 	if a.faqService != nil {
-		_ = a.faqService.RecordQuestion(productID, question)
+		if err := a.faqService.RecordQuestion(productID, question); err != nil {
+			log.Printf("[FAQ] RecordQuestion error: %v", err)
+		}
 	}
 }
 
