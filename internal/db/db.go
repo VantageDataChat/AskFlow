@@ -335,6 +335,7 @@ func migrateProductTables(db *sql.DB) error {
 		{"products", "welcome_message", "ALTER TABLE products ADD COLUMN welcome_message TEXT DEFAULT ''"},
 		{"products", "type", "ALTER TABLE products ADD COLUMN type TEXT DEFAULT 'service'"},
 		{"products", "allow_download", "ALTER TABLE products ADD COLUMN allow_download INTEGER DEFAULT 0"},
+		{"faq_entries", "embedding", "ALTER TABLE faq_entries ADD COLUMN embedding TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {

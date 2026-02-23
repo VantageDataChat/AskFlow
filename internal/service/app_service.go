@@ -142,6 +142,7 @@ func (as *AppService) Initialize(dataDir string, overrideBind string, overridePo
 
 	as.productService = product.NewProductService(readDB, writeDB)
 	as.faqService = faq.NewService(readDB, writeDB)
+	as.faqService.SetEmbedding(es.Embed, vectorstore.CosineSimilarity)
 	as.queryEngine = query.NewQueryEngine(es, vs, ls, writeDB, readDB, as.cfg)
 	as.pendingManager = pending.NewPendingQuestionManager(writeDB, tc, es, vs, ls)
 	as.oauthClient = auth.NewOAuthClient(as.cfg.OAuth.Providers)

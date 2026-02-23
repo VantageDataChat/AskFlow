@@ -8,7 +8,9 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -24,10 +26,21 @@ type Entry struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// EmbedFunc generates an embedding vector for a text string.
+type EmbedFunc func(text string) ([]float64, error)
+
+// SimilarityFunc computes similarity between two vectors (e.g. cosine similarity).
+type SimilarityFunc func(a, b []float64) float64
+
+// SimilarityThreshold is the minimum cosine similarity to consider two questions as duplicates.
+const SimilarityThreshold = 0.90
+
 // Service handles FAQ CRUD and weight tracking.
 type Service struct {
-	readDB  *sql.DB
-	writeDB *sql.DB
+	readDB    *sql.DB
+	writeDB   *sql.DB
+	embedFn   EmbedFunc
+	similarFn SimilarityFunc
 }
 
 // NewService creates a new FAQ Service.
@@ -35,9 +48,17 @@ func NewService(readDB, writeDB *sql.DB) *Service {
 	return &Service{readDB: readDB, writeDB: writeDB}
 }
 
+// SetEmbedding configures embedding-based similarity deduplication.
+// When set, RecordQuestion will use vector similarity to merge semantically
+// similar questions even if their text differs.
+func (s *Service) SetEmbedding(embed EmbedFunc, similarity SimilarityFunc) {
+	s.embedFn = embed
+	s.similarFn = similarity
+}
+
 // RecordQuestion records a user query. If a similar question already exists
-// for the product (case-insensitive, trimmed match), its weight is incremented.
-// Otherwise a new entry is created with weight 1.
+// for the product (exact normalized match or embedding similarity >= threshold),
+// its weight is incremented. Otherwise a new entry is created with weight 1.
 func (s *Service) RecordQuestion(productID, question string) error {
 	question = strings.TrimSpace(question)
 	if question == "" || productID == "" {
@@ -48,7 +69,7 @@ func (s *Service) RecordQuestion(productID, question string) error {
 		return nil
 	}
 
-	// Try to find existing entry with same normalized question for this product
+	// Level 1: exact normalized match
 	var existingID string
 	err := s.writeDB.QueryRow(
 		`SELECT id FROM faq_entries WHERE product_id = ? AND normalized = ?`,
@@ -56,7 +77,6 @@ func (s *Service) RecordQuestion(productID, question string) error {
 	).Scan(&existingID)
 
 	if err == nil {
-		// Found existing — increment weight
 		_, err = s.writeDB.Exec(
 			`UPDATE faq_entries SET weight = weight + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			existingID,
@@ -67,7 +87,16 @@ func (s *Service) RecordQuestion(productID, question string) error {
 		return fmt.Errorf("faq lookup failed: %w", err)
 	}
 
-	// New entry — get next sort_order
+	// Level 2: embedding similarity match (if configured)
+	if matchID := s.findSimilarByEmbedding(productID, question); matchID != "" {
+		_, err = s.writeDB.Exec(
+			`UPDATE faq_entries SET weight = weight + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			matchID,
+		)
+		return err
+	}
+
+	// No match — create new entry
 	var maxOrder int
 	_ = s.writeDB.QueryRow(
 		`SELECT COALESCE(MAX(sort_order), 0) FROM faq_entries WHERE product_id = ?`,
@@ -78,12 +107,103 @@ func (s *Service) RecordQuestion(productID, question string) error {
 	if err != nil {
 		return err
 	}
+
+	// Pre-compute embedding for the new entry
+	var embJSON []byte
+	if s.embedFn != nil {
+		if vec, embErr := s.embedFn(question); embErr == nil && len(vec) > 0 {
+			embJSON, _ = json.Marshal(vec)
+		}
+	}
+
 	_, err = s.writeDB.Exec(
-		`INSERT INTO faq_entries (id, product_id, question, normalized, weight, sort_order, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		id, productID, question, normalized, maxOrder+1,
+		`INSERT INTO faq_entries (id, product_id, question, normalized, weight, sort_order, embedding, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		id, productID, question, normalized, maxOrder+1, nullableBytes(embJSON),
 	)
 	return err
+}
+
+// findSimilarByEmbedding searches existing FAQ entries for the product using
+// vector cosine similarity. Returns the ID of the best match above threshold,
+// or empty string if none found.
+func (s *Service) findSimilarByEmbedding(productID, question string) string {
+	if s.embedFn == nil || s.similarFn == nil {
+		return ""
+	}
+
+	queryVec, err := s.embedFn(question)
+	if err != nil || len(queryVec) == 0 {
+		log.Printf("[FAQ] embedding failed for similarity check: %v", err)
+		return ""
+	}
+
+	// Load existing entries with their cached embeddings
+	rows, err := s.readDB.Query(
+		`SELECT id, question, embedding FROM faq_entries WHERE product_id = ?`,
+		productID,
+	)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+
+	var bestID string
+	var bestScore float64
+
+	for rows.Next() {
+		var id, q string
+		var embData sql.NullString
+		if err := rows.Scan(&id, &q, &embData); err != nil {
+			continue
+		}
+
+		var entryVec []float64
+		if embData.Valid && embData.String != "" {
+			if err := json.Unmarshal([]byte(embData.String), &entryVec); err == nil && len(entryVec) > 0 {
+				// Use cached embedding
+				score := s.similarFn(queryVec, entryVec)
+				if score > bestScore {
+					bestScore = score
+					bestID = id
+				}
+				continue
+			}
+		}
+
+		// No cached embedding — compute and cache it
+		entryVec, embErr := s.embedFn(q)
+		if embErr != nil || len(entryVec) == 0 {
+			continue
+		}
+		// Cache the embedding for future use
+		if embJSON, err := json.Marshal(entryVec); err == nil {
+			s.writeDB.Exec(
+				`UPDATE faq_entries SET embedding = ? WHERE id = ?`,
+				string(embJSON), id,
+			)
+		}
+
+		score := s.similarFn(queryVec, entryVec)
+		if score > bestScore {
+			bestScore = score
+			bestID = id
+		}
+	}
+
+	if bestScore >= SimilarityThreshold {
+		log.Printf("[FAQ] semantic merge: %.4f similarity for product=%s", bestScore, productID)
+		return bestID
+	}
+	return ""
+}
+
+// nullableBytes returns a sql.NullString for optional embedding data.
+func nullableBytes(data []byte) sql.NullString {
+	if len(data) == 0 {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: string(data), Valid: true}
 }
 
 // Create manually creates a FAQ entry (admin operation).
