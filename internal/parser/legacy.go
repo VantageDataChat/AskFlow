@@ -681,6 +681,12 @@ func extractPPTImages(picturesData []byte) []ImageRef {
 			continue
 		}
 
+		// Filter out small images (icons, bullets, decorations) by pixel dimensions
+		if isSmallImage(imageData) {
+			log.Printf("[PPT Legacy] skipping small image %d (%d bytes)", imageIndex, len(imageData))
+			continue
+		}
+
 		images = append(images, ImageRef{
 			Alt:  fmt.Sprintf("PPT图片%d", imageIndex),
 			Data: imageData,
@@ -1073,7 +1079,7 @@ func extractDocImages(dataStream []byte) []ImageRef {
 			if lastEOI >= 0 {
 				endPos := pos + 3 + lastEOI + 2 // include the EOI marker
 				imgData := dataStream[pos:endPos]
-				if len(imgData) >= minImageSize {
+				if len(imgData) >= minImageSize && !isSmallImage(imgData) {
 					images = append(images, ImageRef{
 						Alt:  fmt.Sprintf("DOC图片%d", imageIndex),
 						Data: append([]byte(nil), imgData...), // copy to avoid holding entire stream
@@ -1094,7 +1100,7 @@ func extractDocImages(dataStream []byte) []ImageRef {
 			if iendIdx >= 0 {
 				endPos := pos + 8 + iendIdx + len(pngIEND)
 				imgData := dataStream[pos:endPos]
-				if len(imgData) >= minImageSize {
+				if len(imgData) >= minImageSize && !isSmallImage(imgData) {
 					images = append(images, ImageRef{
 						Alt:  fmt.Sprintf("DOC图片%d", imageIndex),
 						Data: append([]byte(nil), imgData...), // copy to avoid holding entire stream

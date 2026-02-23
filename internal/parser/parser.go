@@ -434,6 +434,10 @@ func (dp *DocumentParser) parseWord(data []byte) (result *ParseResult, err error
 				if ext == ".emf" || ext == ".wmf" {
 					converted := convertMetafileImage(imgData, ext)
 					if converted != nil {
+						if isSmallImage(converted) {
+							log.Printf("[Word] skipping small converted image %s (%d bytes)", f.Name, len(converted))
+							continue
+						}
 						imgIdx++
 						images = append(images, ImageRef{
 							Alt:  fmt.Sprintf("Word图片%d", imgIdx),
@@ -445,6 +449,11 @@ func (dp *DocumentParser) parseWord(data []byte) (result *ParseResult, err error
 				} else {
 					log.Printf("[Word] skipping %s: unsupported format (ext=%s)", f.Name, ext)
 				}
+				continue
+			}
+			// Filter out small images (icons, bullets, decorations)
+			if isSmallImage(imgData) {
+				log.Printf("[Word] skipping small image %s (%d bytes)", f.Name, len(imgData))
 				continue
 			}
 			imgIdx++
@@ -681,6 +690,22 @@ func isImageJPEGOrPNG(data []byte) bool {
 		return true // PNG
 	}
 	return false
+}
+
+// isSmallImage checks if the given JPEG/PNG image data represents a small
+// image (likely an icon, bullet, or decoration) that has no meaningful semantic
+// content. It returns true when the image should be filtered out.
+// Thresholds: dimensions < 64×64 pixels OR file size < 2KB.
+func isSmallImage(data []byte) bool {
+	if len(data) < 2048 {
+		return true
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		// Cannot decode header — keep the image to be safe
+		return false
+	}
+	return cfg.Width < 64 || cfg.Height < 64
 }
 
 // isPPTLayerPDF detects PDFs generated from PPT/Keynote where each page contains
