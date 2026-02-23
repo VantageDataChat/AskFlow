@@ -83,13 +83,19 @@ Single Go binary deployment, SQLite storage, ready out of the box.
 │ │ Video   │                  │                     │
 │ │ Parser  │                  │                     │
 │ │(ffmpeg+ │                  │                     │
-│ │whisper) │                  │                     │
+│ │RapidSpch)│                 │                     │
 │ └─────────┘                  │                     │
 │             ┌─────────────────▼──────────────────┐  │
-│             │    SQLite + Vector Store           │  │
-│             │ (WAL mode + in-memory cache +      │  │
-│             │  cosine similarity search)          │  │
+│             │    SQLite + Vec Extension           │  │
+│             │  (WAL mode + memory cache +        │  │
+│             │   HNSW vector index)                │  │
 │             └────────────────────────────────────┘  │
+│                         │                           │
+│          ┌─────────────▼─────────────┐             │
+│          │    Vector Processing       │             │
+│          │ (Semantic Deduplication +  │             │
+│          │    3-Tier Retrieval Opt)   │             │
+│          └───────────────────────────┘             │
 └─────────────────────────────────────────────────────┘
                        │
           ┌────────────▼────────────┐
@@ -102,11 +108,12 @@ Single Go binary deployment, SQLite storage, ready out of the box.
 |-----------|------------|
 | Backend | Go 1.25+ |
 | Database | SQLite (WAL mode, foreign keys) |
-| Vector Store | SQLite persistence + in-memory cache, concurrent cosine similarity search |
+| Vector Store | SQLite + Vec Extension (in-memory cache + HNSW vector index) |
+| Vector Processing | Semantic deduplication (Embedding similarity merge), 3-tier retrieval optimization (text → vector cache → full RAG) |
 | LLM | OpenAI-compatible Chat Completion API (supports vision models) |
 | Embedding | OpenAI-compatible Embedding API (multimodal: text + image) |
 | Document Parsing | GoPDF2, GoWord, GoExcel, GoPPT |
-| Video Processing | ffmpeg (audio extraction + keyframe sampling) + whisper (speech transcription) |
+| Video Processing | ffmpeg (audio extraction + keyframe sampling) + RapidSpeech.cpp (offline local ASR) |
 | Frontend | SPA (photo gallery, media modal, streaming video; compiled assets in frontend/dist) |
 | Authentication | OAuth 2.0 + bcrypt + Session |
 | Encryption | AES-256-GCM |
@@ -153,7 +160,7 @@ askflow/
 │   ├── backup/
 │   │   └── backup.go            # Data backup & restore (full/incremental)
 │   ├── video/
-│   │   └── parser.go            # Video parsing (ffmpeg keyframes + whisper transcription)
+│   │   └── parser.go            # Video parsing (ffmpeg keyframes + RapidSpeech.cpp transcription)
 │   └── email/
 │       └── service.go           # SMTP email sending (verification/test)
 │
@@ -322,11 +329,13 @@ Supported providers: `google`, `apple`, `amazon`, `facebook`.
 | Field | Default | Description |
 |-------|---------|-------------|
 | `video.ffmpeg_path` | — | ffmpeg executable path; empty disables video support |
-| `video.whisper_path` | — | whisper CLI executable path; empty skips speech transcription |
+| `video.rapidspeech_path` | — | RapidSpeech.cpp (rs-asr-offline) executable path; empty skips speech transcription |
+| `video.rapidspeech_model` | — | RapidSpeech model file path (model.gguf), required with rapidspeech_path |
 | `video.keyframe_interval` | `10` | Keyframe sampling interval in seconds |
-| `video.whisper_model` | `base` | whisper model name |
+| `video.keyframe_ocr_enabled` | `false` | Enable OCR text recognition on keyframes |
+| `video.keyframe_ocr_max_frames` | `10` | Maximum number of keyframes to process with OCR |
 
-Video features require external tools. With only `ffmpeg_path` configured, only keyframe extraction is performed. Adding `whisper_path` enables speech transcription as well.
+Video features require external tools. With only `ffmpeg_path` configured, only keyframe extraction is performed. Adding `rapidspeech_path` and `rapidspeech_model` enables speech transcription as well.
 
 ### Advanced Vector Search Options
 
@@ -334,6 +343,8 @@ Video features require external tools. With only `ffmpeg_path` configured, only 
 |-------|---------|-------------|
 | `vector.content_priority` | `image_text` | Result ordering: `image_text` prioritizes image-containing results, `text_only` prioritizes pure text |
 | `vector.text_match_enabled` | `true` | Enable 3-level text matching to reduce API calls via local text matching and cache reuse |
+| `vector.deduplication_enabled` | `true` | Enable semantic deduplication based on Embedding similarity; auto-merge similar chunks during document import |
+| `vector.deduplication_threshold` | `0.95` | Deduplication threshold (0-1); chunks with similarity above this will be merged |
 | `vector.debug_mode` | `false` | When enabled, query responses include search diagnostic information |
 
 ### Environment Variables
@@ -605,7 +616,7 @@ File Type Detection
    │
    └── Video (MP4/AVI/MKV/MOV/WebM)
          │
-         ├── ffmpeg extract audio → whisper transcription
+         ├── ffmpeg extract audio → RapidSpeech.cpp transcription
          │    │
          │    ▼
          │  Chunk transcript text → embed → store

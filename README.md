@@ -83,12 +83,17 @@ Go 单二进制部署，SQLite 存储，开箱即用。
 │ │ Video   │                  │                     │
 │ │ Parser  │                  │                     │
 │ │(ffmpeg+ │                  │                     │
-│ │whisper) │                  │                     │
+│ │RapidSpch)│                 │                     │
 │ └─────────┘                  │                     │
 │             ┌─────────────────▼──────────────────┐  │
-│             │    SQLite + Vector Store           │  │
-│             │ (WAL 模式 + 内存缓存 + 余弦相似度) │  │
+│             │    SQLite + Vec Extension          │  │
+│             │  (WAL 模式 + 内存缓存 + 向量索引)  │  │
 │             └────────────────────────────────────┘  │
+│                         │                           │
+│          ┌─────────────▼─────────────┐             │
+│          │    向量处理引擎            │             │
+│          │ (语义去重 + 3级检索优化)   │             │
+│          └───────────────────────────┘             │
 └─────────────────────────────────────────────────────┘
                        │
           ┌────────────▼────────────┐
@@ -101,11 +106,12 @@ Go 单二进制部署，SQLite 存储，开箱即用。
 |------|----------|
 | 后端 | Go 1.25+ |
 | 数据库 | SQLite（WAL 模式，外键约束） |
-| 向量存储 | SQLite 持久化 + 内存缓存，并发余弦相似度检索 |
+| 向量存储 | SQLite + Vec Extension（内存缓存 + HNSW 向量索引） |
+| 向量处理 | 语义去重（Embedding 相似度合并）、3 级检索优化（文本→向量缓存→完整 RAG） |
 | LLM | OpenAI 兼容 Chat Completion API（支持视觉模型） |
 | Embedding | OpenAI 兼容 Embedding API（支持多模态：文本 + 图片） |
 | 文档解析 | GoPDF2、GoWord、GoExcel、GoPPT |
-| 视频处理 | ffmpeg（音频提取 + 关键帧抽取）+ whisper（语音转录） |
+| 视频处理 | ffmpeg（音频提取 + 关键帧抽取）+ RapidSpeech.cpp（语音转录，本地离线 ASR） |
 | 前端 | SPA 单页应用（照片墙画廊、媒体弹窗播放、流式视频，编译产物位于 frontend/dist） |
 | 认证 | OAuth 2.0 + bcrypt + Session |
 | 加密 | AES-256-GCM |
@@ -152,7 +158,7 @@ askflow/
 │   ├── backup/
 │   │   └── backup.go            # 数据备份与恢复（全量/增量）
 │   ├── video/
-│   │   └── parser.go            # 视频解析（ffmpeg 关键帧 + whisper 语音转录）
+│   │   └── parser.go            # 视频解析（ffmpeg 关键帧 + RapidSpeech.cpp 语音转录）
 │   └── email/
 │       └── service.go           # SMTP 邮件发送（验证/测试）
 │
@@ -321,11 +327,13 @@ curl -X POST http://localhost:8080/api/query \
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `video.ffmpeg_path` | — | ffmpeg 可执行文件路径，为空则不支持视频 |
-| `video.whisper_path` | — | whisper CLI 可执行文件路径，为空则跳过语音转录 |
+| `video.rapidspeech_path` | — | RapidSpeech.cpp (rs-asr-offline) 可执行文件路径，为空则跳过语音转录 |
+| `video.rapidspeech_model` | — | RapidSpeech 模型文件路径（model.gguf），需配合 rapidspeech_path 使用 |
 | `video.keyframe_interval` | `10` | 关键帧抽样间隔（秒） |
-| `video.whisper_model` | `base` | whisper 模型名称 |
+| `video.keyframe_ocr_enabled` | `false` | 启用关键帧 OCR 文字识别 |
+| `video.keyframe_ocr_max_frames` | `10` | OCR 最多处理关键帧数量 |
 
-视频功能需要外部工具支持。仅配置 `ffmpeg_path` 时只提取关键帧；同时配置 `whisper_path` 后还会进行语音转录。
+视频功能需要外部工具支持。仅配置 `ffmpeg_path` 时只提取关键帧；同时配置 `rapidspeech_path` 和 `rapidspeech_model` 后还会进行语音转录。
 
 ### 向量检索高级选项
 
@@ -333,6 +341,8 @@ curl -X POST http://localhost:8080/api/query \
 |------|--------|------|
 | `vector.content_priority` | `image_text` | 检索结果排序优先级：`image_text` 优先展示含图片的结果，`text_only` 优先展示纯文本结果 |
 | `vector.text_match_enabled` | `true` | 启用 3 级文本匹配，通过本地文本匹配和缓存复用减少 API 调用 |
+| `vector.deduplication_enabled` | `true` | 启用基于 Embedding 相似度的语义去重，导入文档时自动合并高相似度分块 |
+| `vector.deduplication_threshold` | `0.95` | 语义去重阈值（0-1），高于此阈值的相似分块将被合并 |
 | `vector.debug_mode` | `false` | 启用后查询响应中包含检索诊断信息 |
 
 ### 环境变量
@@ -604,7 +614,7 @@ Level 3: 完整 RAG（Embedding + LLM）
    │
    └── 视频（MP4/AVI/MKV/MOV/WebM）
          │
-         ├── ffmpeg 提取音频 → whisper 语音转录
+         ├── ffmpeg 提取音频 → RapidSpeech.cpp 语音转录
          │    │
          │    ▼
          │  转录文本分块 → 嵌入 → 存储
