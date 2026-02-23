@@ -128,6 +128,11 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 			FileType:  fileType,
 			ProductID: r.FormValue("product_id"),
 		}
+		// Validate product_id format
+		if !IsValidOptionalID(req.ProductID) {
+			WriteError(w, http.StatusBadRequest, "invalid product_id")
+			return
+		}
 		doc, err := app.UploadFile(req)
 		if err != nil {
 			errlog.Logf("[API] file upload rejected file=%q type=%s: %v", header.Filename, fileType, err)
@@ -182,6 +187,11 @@ func HandleDocumentURL(app *App) http.HandlerFunc {
 		var req document.UploadURLRequest
 		if err := ReadJSONBody(r, &req); err != nil {
 			WriteError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		// Validate product_id format
+		if !IsValidOptionalID(req.ProductID) {
+			WriteError(w, http.StatusBadRequest, "invalid product_id")
 			return
 		}
 		doc, err := app.UploadURL(req)
@@ -443,6 +453,10 @@ func HandleBatchImport(app *App) http.HandlerFunc {
 
 		// Validate product ID if provided
 		if req.ProductID != "" {
+			if !IsValidOptionalID(req.ProductID) {
+				WriteError(w, http.StatusBadRequest, "invalid product_id")
+				return
+			}
 			p, err := app.productService.GetByID(req.ProductID)
 			if err != nil || p == nil {
 				WriteError(w, http.StatusBadRequest, fmt.Sprintf("产品不存在(ID: %s)", req.ProductID))

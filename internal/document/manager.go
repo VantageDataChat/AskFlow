@@ -473,6 +473,12 @@ func isStandardImageFormat(data []byte) bool {
 	if len(data) >= 4 && string(data[:4]) == "\x89PNG" {
 		return true // PNG
 	}
+	if len(data) >= 4 && string(data[:4]) == "RIFF" {
+		return true // WebP
+	}
+	if len(data) >= 3 && string(data[:3]) == "GIF" {
+		return true // GIF
+	}
 	return false
 }
 
@@ -490,7 +496,7 @@ func detectImageMIME(data []byte) string {
 	if len(data) >= 3 && string(data[:3]) == "GIF" {
 		return "image/gif"
 	}
-	return "image/png" // default fallback
+	return "application/octet-stream" // unknown format
 }
 
 // imageToBase64DataURL converts raw image data to a base64 data URL.
@@ -1515,8 +1521,10 @@ func (dm *DocumentManager) saveOriginalFile(docID, filename string, data []byte)
 func (dm *DocumentManager) saveExtractedImage(data []byte) (string, error) {
 	// Map MIME type to file extension
 	mime := detectImageMIME(data)
-	ext := ".png"
+	ext := ".bin"
 	switch mime {
+	case "image/png":
+		ext = ".png"
 	case "image/jpeg":
 		ext = ".jpg"
 	case "image/webp":
