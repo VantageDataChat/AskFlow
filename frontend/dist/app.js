@@ -5605,7 +5605,7 @@
         var container = document.getElementById('faq-admin-list');
         if (!container) return;
         if (!faqs || faqs.length === 0) {
-            container.innerHTML = '<p class="admin-table-empty">暂无FAQ</p>';
+            container.innerHTML = '<p class="admin-table-empty">' + i18n.t('admin_faq_empty') + '</p>';
             return;
         }
         var html = '';
@@ -5615,9 +5615,9 @@
                 '<span class="faq-admin-drag">☰</span>' +
                 '<span class="faq-admin-order">' + (i + 1) + '</span>' +
                 '<span class="faq-admin-question">' + escapeHtml(f.question) + '</span>' +
-                '<span class="faq-admin-weight" title="权重">(' + f.weight + ')</span>' +
-                '<button class="btn-primary btn-sm" onclick="editAdminFAQ(\'' + escapeHtml(f.id) + '\', this)">编辑</button>' +
-                '<button class="btn-danger btn-sm" onclick="deleteAdminFAQ(\'' + escapeHtml(f.id) + '\')">删除</button>' +
+                '<span class="faq-admin-weight" title="' + i18n.t('admin_faq_weight_title') + '">(' + f.weight + ')</span>' +
+                '<button class="btn-primary btn-sm" onclick="editAdminFAQ(\'' + escapeHtml(f.id) + '\', this)">' + i18n.t('admin_faq_edit_btn') + '</button>' +
+                '<button class="btn-danger btn-sm" onclick="deleteAdminFAQ(\'' + escapeHtml(f.id) + '\')">' + i18n.t('admin_faq_delete_btn') + '</button>' +
             '</div>';
         }
         container.innerHTML = html;
@@ -5630,7 +5630,7 @@
         var productID = sel ? sel.value : '';
         var question = input ? input.value.trim() : '';
         if (!productID || !question) {
-            showAdminToast('请选择产品并输入问题', 'error');
+            showAdminToast(i18n.t('admin_faq_select_product'), 'error');
             return;
         }
         adminFetch('/api/admin/faq', {
@@ -5639,16 +5639,16 @@
             body: JSON.stringify({ product_id: productID, question: question })
         })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '添加失败'); });
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_faq_add_fail')); });
             return res.json();
         })
         .then(function () {
-            showAdminToast('FAQ已添加', 'success');
+            showAdminToast(i18n.t('admin_faq_added'), 'success');
             if (input) input.value = '';
             loadAdminFAQ();
         })
         .catch(function (err) {
-            showAdminToast(err.message || '添加失败', 'error');
+            showAdminToast(err.message || i18n.t('admin_faq_add_fail'), 'error');
         });
     };
 
@@ -5656,7 +5656,7 @@
         var item = btn.closest('.faq-admin-item');
         var qSpan = item.querySelector('.faq-admin-question');
         var oldText = qSpan.textContent;
-        var newText = prompt('编辑问题:', oldText);
+        var newText = prompt(i18n.t('admin_faq_edit_prompt'), oldText);
         if (newText === null || newText.trim() === '' || newText.trim() === oldText) return;
         adminFetch('/api/admin/faq/' + encodeURIComponent(id), {
             method: 'PUT',
@@ -5664,25 +5664,25 @@
             body: JSON.stringify({ question: newText.trim() })
         })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '编辑失败'); });
-            showAdminToast('已更新', 'success');
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_faq_edit_fail')); });
+            showAdminToast(i18n.t('admin_faq_updated'), 'success');
             loadAdminFAQ();
         })
         .catch(function (err) {
-            showAdminToast(err.message || '编辑失败', 'error');
+            showAdminToast(err.message || i18n.t('admin_faq_edit_fail'), 'error');
         });
     };
 
     window.deleteAdminFAQ = function (id) {
-        if (!confirm('确定删除该FAQ？')) return;
+        if (!confirm(i18n.t('admin_faq_delete_confirm'))) return;
         adminFetch('/api/admin/faq/' + encodeURIComponent(id), { method: 'DELETE' })
             .then(function (res) {
-                if (!res.ok) throw new Error('删除失败');
-                showAdminToast('已删除', 'success');
+                if (!res.ok) throw new Error(i18n.t('admin_faq_delete_fail'));
+                showAdminToast(i18n.t('admin_faq_deleted'), 'success');
                 loadAdminFAQ();
             })
             .catch(function (err) {
-                showAdminToast(err.message || '删除失败', 'error');
+                showAdminToast(err.message || i18n.t('admin_faq_delete_fail'), 'error');
             });
     };
 
@@ -5730,11 +5730,11 @@
             body: JSON.stringify({ ids: ids })
         })
         .then(function (res) {
-            if (!res.ok) throw new Error('排序失败');
-            showAdminToast('排序已保存', 'success');
+            if (!res.ok) throw new Error(i18n.t('admin_faq_order_fail'));
+            showAdminToast(i18n.t('admin_faq_order_saved'), 'success');
         })
         .catch(function (err) {
-            showAdminToast(err.message || '排序失败', 'error');
+            showAdminToast(err.message || i18n.t('admin_faq_order_fail'), 'error');
         });
     }
 

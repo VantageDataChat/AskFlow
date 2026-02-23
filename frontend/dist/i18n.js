@@ -648,6 +648,31 @@
             'batch_report_success': '成功',
             'batch_report_failed': '失败',
 
+            // Admin - FAQ management
+            'admin_nav_faq': 'FAQ管理',
+            'admin_faq_title': 'FAQ管理',
+            'admin_faq_product_label': '选择产品：',
+            'admin_faq_add_legend': '添加FAQ',
+            'admin_faq_input_placeholder': '输入常见问题...',
+            'admin_faq_add_btn': '添加',
+            'admin_faq_list_legend': 'FAQ列表',
+            'admin_faq_list_hint': '（拖拽排序）',
+            'admin_faq_empty': '暂无FAQ',
+            'admin_faq_weight_title': '权重',
+            'admin_faq_edit_btn': '编辑',
+            'admin_faq_delete_btn': '删除',
+            'admin_faq_edit_prompt': '编辑问题:',
+            'admin_faq_edit_fail': '编辑失败',
+            'admin_faq_updated': '已更新',
+            'admin_faq_delete_confirm': '确定删除该FAQ？',
+            'admin_faq_delete_fail': '删除失败',
+            'admin_faq_deleted': '已删除',
+            'admin_faq_added': 'FAQ已添加',
+            'admin_faq_add_fail': '添加失败',
+            'admin_faq_select_product': '请选择产品并输入问题',
+            'admin_faq_order_saved': '排序已保存',
+            'admin_faq_order_fail': '排序失败',
+
             // Language
             'lang_switch': 'EN'
         },
@@ -1291,6 +1316,31 @@
             'batch_report_total': 'Total Files',
             'batch_report_success': 'Success',
             'batch_report_failed': 'Failed',
+
+            // Admin - FAQ management
+            'admin_nav_faq': 'FAQ Management',
+            'admin_faq_title': 'FAQ Management',
+            'admin_faq_product_label': 'Product:',
+            'admin_faq_add_legend': 'Add FAQ',
+            'admin_faq_input_placeholder': 'Enter a common question...',
+            'admin_faq_add_btn': 'Add',
+            'admin_faq_list_legend': 'FAQ List',
+            'admin_faq_list_hint': '(drag to reorder)',
+            'admin_faq_empty': 'No FAQ entries',
+            'admin_faq_weight_title': 'Weight',
+            'admin_faq_edit_btn': 'Edit',
+            'admin_faq_delete_btn': 'Delete',
+            'admin_faq_edit_prompt': 'Edit question:',
+            'admin_faq_edit_fail': 'Edit failed',
+            'admin_faq_updated': 'Updated',
+            'admin_faq_delete_confirm': 'Are you sure you want to delete this FAQ?',
+            'admin_faq_delete_fail': 'Delete failed',
+            'admin_faq_deleted': 'Deleted',
+            'admin_faq_added': 'FAQ added',
+            'admin_faq_add_fail': 'Add failed',
+            'admin_faq_select_product': 'Please select a product and enter a question',
+            'admin_faq_order_saved': 'Order saved',
+            'admin_faq_order_fail': 'Reorder failed',
 
             // Language
             'lang_switch': '中文'
