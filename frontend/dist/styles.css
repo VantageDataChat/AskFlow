@@ -1368,6 +1368,7 @@ a.chat-source-download:hover {
     display: flex;
     width: 100%;
     height: 100vh;
+    overflow: hidden;
     background: linear-gradient(135deg, #EBF2FF 0%, #F0F5FF 50%, #F5F8FF 100%);
 }
 
@@ -1484,6 +1485,7 @@ a.chat-source-download:hover {
 .admin-main {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     background: transparent;
     padding: 12px 12px 12px 0;
 }
@@ -1513,6 +1515,7 @@ a.chat-source-download:hover {
     backdrop-filter: blur(8px);
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
     min-height: calc(100vh - 100px);
+    overflow-x: hidden;
 }
 
 /* Upload Section */
