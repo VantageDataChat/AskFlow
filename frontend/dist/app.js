@@ -1015,6 +1015,7 @@
         }
 
         // 0b. Store owner context (from scope=store login) — auto-select shop sub-product
+        // Note: do NOT remove askflow_store_context here; it's needed by applyAdminRoleVisibility
         var storeContextRaw = localStorage.getItem('askflow_store_context');
         if (storeContextRaw) {
             try {
@@ -1026,7 +1027,6 @@
                     }
                 }
             } catch (e) { /* ignore */ }
-            localStorage.removeItem('askflow_store_context');
             if (callback) callback();
             return;
         }
@@ -4485,19 +4485,18 @@
             return res.json();
         })
         .then(function (data) {
+            // Handle store scope — store owner management session (no regular session)
+            if (data.store && data.store.scope === 'store' && data.admin_session) {
+                saveAdminSession(data.admin_session, data.admin_user);
+                localStorage.setItem('askflow_store_context', JSON.stringify(data.store));
+                window.history.replaceState({}, '', '/admin-panel');
+                handleRoute();
+                return;
+            }
+
             if (data.session && data.user) {
                 saveSession(data.session, { id: data.user.id, email: data.user.email, name: data.user.name, provider: data.user.provider });
                 fetchProducts();
-
-                // Handle store scope — store owner management session
-                // Save admin session and redirect to admin panel
-                if (data.store && data.store.scope === 'store' && data.admin_session) {
-                    saveAdminSession(data.admin_session, data.admin_user);
-                    localStorage.setItem('askflow_store_context', JSON.stringify(data.store));
-                    window.history.replaceState({}, '', '/admin-panel');
-                    handleRoute();
-                    return;
-                }
 
                 // Handle customer scope — redirect to chat with store product selected
                 if (data.store && data.store.scope === 'customer') {

@@ -605,16 +605,26 @@ func (s *ShopService) Delete(shopID string, retainKnowledge bool) error {
 		}
 	}
 
-	// 6. Delete the child product (shop module)
+	// 6. Delete the child product and its admin_user_products assignments
 	if moduleProductID != "" {
+		tx.Exec(`DELETE FROM admin_user_products WHERE product_id = ?`, moduleProductID)
 		if _, err := tx.Exec(`DELETE FROM products WHERE id = ?`, moduleProductID); err != nil {
 			return fmt.Errorf("failed to delete shop module product: %w", err)
 		}
 	}
 
-	// 7. Commit transaction
+	// 7. Clean up store owner sub-admin account (username = store_{shopID})
+	storeUsername := "store_" + shopID
+	var subAdminID string
+	if err := s.readDB.QueryRow(`SELECT id FROM admin_users WHERE username = ?`, storeUsername).Scan(&subAdminID); err == nil {
+		tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, "admin_"+subAdminID)
+		tx.Exec(`DELETE FROM admin_users WHERE id = ?`, subAdminID)
+	}
+
+	// 8. Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit delete transaction: %w", err)
 	}
 	return nil
 }
+

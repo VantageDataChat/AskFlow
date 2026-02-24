@@ -617,6 +617,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 				}
 
 				resp["admin_session"] = adminSession
+				delete(resp, "session") // Remove stale regular session
 				resp["admin_user"] = map[string]string{
 					"username": foundShop.Name,
 					"provider": "admin",
