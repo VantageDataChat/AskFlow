@@ -114,6 +114,11 @@ func InitDB(dbPath string) (*DBPair, error) {
 		return nil, fmt.Errorf("failed to create faq table: %w", err)
 	}
 
+	if err := createShopTables(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create shop tables: %w", err)
+	}
+
 	if err := migrateTables(writeDB); err != nil {
 		cleanup()
 		return nil, err
@@ -122,11 +127,6 @@ func InitDB(dbPath string) (*DBPair, error) {
 	if err := migrateProductTables(writeDB); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("failed to migrate product tables: %w", err)
-	}
-
-	if err := createShopTables(writeDB); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("failed to create shop tables: %w", err)
 	}
 
 	if err := createIndexes(writeDB); err != nil {
@@ -511,6 +511,12 @@ func migrateTables(db *sql.DB) error {
 	}
 
 	for _, m := range migrations {
+		// Skip migrations for tables that don't exist yet;
+		// they will be created with the correct schema by their
+		// own createXxxTable function later in the init sequence.
+		if !tableExists(db, m.table) {
+			continue
+		}
 		if !columnExists(db, m.table, m.column) {
 			if _, err := db.Exec(m.ddl); err != nil {
 				return fmt.Errorf("migration failed (%s.%s): %w", m.table, m.column, err)
@@ -518,6 +524,15 @@ func migrateTables(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// tableExists checks if a table exists in the database.
+func tableExists(db *sql.DB, table string) bool {
+	var name string
+	err := db.QueryRow(
+		"SELECT name FROM sqlite_master WHERE type='table' AND name=?", table,
+	).Scan(&name)
+	return err == nil
 }
 
 // columnExists checks if a column exists in a table.
