@@ -468,6 +468,7 @@ func HandleTicketLogin(app *App) http.HandlerFunc {
 		// Support scope and store_id parameters for store management sessions
 		scope := r.URL.Query().Get("scope")
 		storeID := r.URL.Query().Get("store_id")
+		log.Printf("[TicketLogin] incoming: scope=%q store_id=%q ticket_len=%d", scope, storeID, len(ticket))
 		if (scope == "store" || scope == "customer") && storeID != "" {
 			// Validate store_id contains only digits
 			for _, c := range storeID {
@@ -514,6 +515,9 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			})
 			return
 		}
+
+		log.Printf("[TicketExchange] request: scope=%q store_id=%d product=%q ticket_len=%d",
+			req.Scope, req.StoreID, req.Product, len(req.Ticket))
 		if req.Ticket == "" {
 			WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false, "message": "ticket is required",
