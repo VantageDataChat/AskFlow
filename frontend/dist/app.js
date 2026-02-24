@@ -4848,7 +4848,7 @@
         window._cachedProducts = products;
 
         if (!products || products.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
             return;
         }
 
@@ -4860,6 +4860,7 @@
             var dlLabel = p.allow_download ? '✅' : '❌';
             html += '<tr>' +
                 '<td>' + escapeHtml(p.name) + '</td>' +
+                '<td><code style="font-size:12px;user-select:all">' + escapeHtml(p.id) + '</code></td>' +
                 '<td>' + escapeHtml(typeLabel) + '</td>' +
                 '<td>' + escapeHtml(p.description || '-') + '</td>' +
                 '<td>' + dlLabel + '</td>' +
