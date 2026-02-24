@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"askflow/internal/shop"
@@ -379,5 +380,96 @@ func TestTicketLogin_LargeStoreID(t *testing.T) {
 	expected := "/?ticket=abc123def456&scope=store&store_id=999999999"
 	if location != expected {
 		t.Errorf("expected redirect to %q, got %q", expected, location)
+	}
+}
+
+// TestTicketLogin_CustomerScopeWithStoreIDAndProduct tests scope=customer with store_id and product.
+func TestTicketLogin_CustomerScopeWithStoreIDAndProduct(t *testing.T) {
+	app := &App{}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/ticket-login?ticket=abc123def456&scope=customer&store_id=123&product=vantagics-%E6%88%91%E7%9A%84%E5%BA%97", nil)
+	rec := httptest.NewRecorder()
+
+	HandleTicketLogin(app)(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rec.Code)
+	}
+
+	location := rec.Header().Get("Location")
+	// product should be re-encoded in the redirect URL
+	if !strings.Contains(location, "scope=customer") {
+		t.Errorf("expected location to contain scope=customer, got %q", location)
+	}
+	if !strings.Contains(location, "store_id=123") {
+		t.Errorf("expected location to contain store_id=123, got %q", location)
+	}
+	if !strings.Contains(location, "product=") {
+		t.Errorf("expected location to contain product=, got %q", location)
+	}
+}
+
+// TestTicketLogin_CustomerScopeWithoutStoreID tests scope=customer without store_id falls back to normal.
+func TestTicketLogin_CustomerScopeWithoutStoreID(t *testing.T) {
+	app := &App{}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/ticket-login?ticket=abc123def456&scope=customer", nil)
+	rec := httptest.NewRecorder()
+
+	HandleTicketLogin(app)(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rec.Code)
+	}
+
+	location := rec.Header().Get("Location")
+	expected := "/?ticket=abc123def456"
+	if location != expected {
+		t.Errorf("expected redirect to %q, got %q", expected, location)
+	}
+}
+
+// TestTicketLogin_CustomerScopeInvalidStoreID tests scope=customer with invalid store_id.
+func TestTicketLogin_CustomerScopeInvalidStoreID(t *testing.T) {
+	app := &App{}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/ticket-login?ticket=abc123def456&scope=customer&store_id=abc", nil)
+	rec := httptest.NewRecorder()
+
+	HandleTicketLogin(app)(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rec.Code)
+	}
+
+	location := rec.Header().Get("Location")
+	if location != "/login?error=invalid_store_id" {
+		t.Errorf("expected redirect to /login?error=invalid_store_id, got %q", location)
+	}
+}
+
+// TestTicketLogin_CustomerScopeWithoutProduct tests scope=customer with store_id but no product.
+func TestTicketLogin_CustomerScopeWithoutProduct(t *testing.T) {
+	app := &App{}
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/ticket-login?ticket=abc123def456&scope=customer&store_id=123", nil)
+	rec := httptest.NewRecorder()
+
+	HandleTicketLogin(app)(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", rec.Code)
+	}
+
+	location := rec.Header().Get("Location")
+	if !strings.Contains(location, "scope=customer") {
+		t.Errorf("expected location to contain scope=customer, got %q", location)
+	}
+	if !strings.Contains(location, "store_id=123") {
+		t.Errorf("expected location to contain store_id=123, got %q", location)
+	}
+	// No product param should be present
+	if strings.Contains(location, "product=") {
+		t.Errorf("expected location to NOT contain product= when product is empty, got %q", location)
 	}
 }

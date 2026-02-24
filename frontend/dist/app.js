@@ -997,6 +997,39 @@
 
     // Resolve initial product: URL param > user default > localStorage
     function resolveInitialProduct(callback) {
+        // 0. Customer store context takes highest priority (from scope=customer login)
+        var customerStoreRaw = localStorage.getItem('askflow_customer_store');
+        if (customerStoreRaw) {
+            try {
+                var customerStore = JSON.parse(customerStoreRaw);
+                if (customerStore.shop_module_product_id) {
+                    localStorage.setItem('askflow_product_id', customerStore.shop_module_product_id);
+                    if (customerStore.product) {
+                        localStorage.setItem('askflow_product_name', customerStore.product);
+                    }
+                    var selector = document.getElementById('chat-product-selector');
+                    if (selector) selector.value = customerStore.shop_module_product_id;
+                }
+            } catch (e) { /* ignore */ }
+            localStorage.removeItem('askflow_customer_store');
+            if (callback) callback();
+            return;
+        }
+
+        // 0b. Store owner context (from scope=store login)
+        var storeContextRaw = localStorage.getItem('askflow_store_context');
+        if (storeContextRaw) {
+            try {
+                var storeCtx = JSON.parse(storeContextRaw);
+                // Store owner's shop_module_product_id is resolved via middleware,
+                // but we can use store_name to find the product
+                if (storeCtx.store_name) {
+                    urlProductName = storeCtx.store_name;
+                }
+            } catch (e) { /* ignore */ }
+            localStorage.removeItem('askflow_store_context');
+        }
+
         // 1. URL parameter takes highest priority
         if (urlProductName) {
             fetchProducts()
@@ -4387,13 +4420,22 @@
         var ticket = params.get('ticket');
         if (!ticket) return false;
 
+        var scope = params.get('scope') || '';
+        var storeID = params.get('store_id') || '';
+        var product = params.get('product') || '';
+
         // Clean the URL immediately so the ticket isn't visible/reusable
         window.history.replaceState({}, '', '/');
+
+        var body = { ticket: ticket };
+        if (scope) body.scope = scope;
+        if (storeID) body.store_id = parseInt(storeID, 10) || 0;
+        if (product) body.product = product;
 
         fetch('/api/auth/ticket-exchange', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ticket: ticket })
+            body: JSON.stringify(body)
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.message || 'ticket login failed'); });
@@ -4403,6 +4445,32 @@
             if (data.session && data.user) {
                 saveSession(data.session, { id: data.user.id, email: data.user.email, name: data.user.name, provider: data.user.provider });
                 fetchProducts();
+
+                // Handle store scope — store owner management session
+                // Auto-select the store's product and redirect to chat
+                if (data.store && data.store.scope === 'store') {
+                    localStorage.setItem('askflow_store_context', JSON.stringify(data.store));
+                    window.history.replaceState({}, '', '/chat');
+                    handleRoute();
+                    return;
+                }
+
+                // Handle customer scope — redirect to chat with store product selected
+                if (data.store && data.store.scope === 'customer') {
+                    localStorage.setItem('askflow_customer_store', JSON.stringify(data.store));
+                    window.history.replaceState({}, '', '/chat');
+                    handleRoute();
+                    return;
+                }
+
+                // Handle store_error — store not approved
+                if (data.store_error) {
+                    showToast(data.store_error, 'error');
+                    window.history.replaceState({}, '', '/chat');
+                    handleRoute();
+                    return;
+                }
+
                 window.history.replaceState({}, '', '/chat');
                 handleRoute();
             }

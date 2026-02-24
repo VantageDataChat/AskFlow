@@ -23,8 +23,9 @@ Service_Portal → Marketplace（查询店铺批准状态）
 | POST /api/store-support/register | **新增** | 全新实现 |
 | POST /api/store-support/update-welcome | **新增** | 全新实现 |
 | POST /api/auth/sn-login | 已有 | 无需修改 |
-| GET /auth/ticket-login | 已有 | 需扩展 scope + store_id 参数 |
+| GET /auth/ticket-login | 已有 | 需扩展 scope + store_id + product 参数（新增 `scope=customer` 场景） |
 | GET /api/storefront-support/check | Marketplace 提供 | Service Portal 调用即可 |
+| POST /api/storefront-support/customer-login | **Marketplace 新增** | 已实现（市场端） |
 
 ---
 
@@ -162,10 +163,13 @@ https://service.vantagedata.chat/auth/ticket-login?ticket={login_ticket}&scope=s
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | ticket | string | 是 | 从 `/api/auth/sn-login` 获取的一次性登录凭证（已有） |
-| scope | string | 否 | **新增参数**。值为 `store` 时表示店铺管理角色；不传时保持原有行为 |
-| store_id | int | 条件必填 | **新增参数**。当 `scope=store` 时必填。店铺 ID，对应 Marketplace 的 `author_storefronts.id` |
+| scope | string | 否 | **新增参数**。值为 `store` 时表示店铺管理角色；值为 `customer` 时表示客户角色（进入店铺客服界面）；不传时保持原有行为 |
+| store_id | int | 条件必填 | **新增参数**。当 `scope=store` 或 `scope=customer` 时必填。店铺 ID，对应 Marketplace 的 `author_storefronts.id` |
+| product | string | 否 | **新增参数**。当 `scope=customer` 时传入。格式为 `"软件名-店铺名"`（如 `vantagics-我的数据分析小铺`），用于客服系统自动切换当前产品为该店铺 |
 
 **扩展要求（相对于现有实现）：**
+
+**场景 A：店铺主进入管理后台（`scope=store`）**
 - 当 `scope=store` 且 `store_id` 存在时，创建店铺管理会话（而非普通用户会话）
 - 店铺管理会话权限限定为以下四个模块：
   - 文档管理（添加、编辑、删除文档资料）
@@ -176,6 +180,20 @@ https://service.vantagedata.chat/auth/ticket-login?ticket={login_ticket}&scope=s
 - 隐藏其他管理模块（系统设置、用户管理等）
 - 页面顶部显示当前管理的店铺名称
 - 不传 `scope` 参数时保持原有行为不变（向后兼容）
+
+**场景 B：客户进入店铺客服界面（`scope=customer`，新增）**
+
+用户在市场的店铺主页点击客服图标时，Marketplace 调用 sn-login 获取 ticket 后，构造如下 URL：
+
+```
+https://service.vantagedata.chat/auth/ticket-login?ticket={login_ticket}&scope=customer&store_id={storefront_id}&product={url_encoded_product_name}
+```
+
+- 当 `scope=customer` 且 `store_id` 存在时，创建客户会话（普通用户角色）
+- 自动将当前产品切换为 `store_id` 对应的店铺（产品名显示为 `product` 参数值，格式：`软件名-店铺名`）
+- 登录后重定向到该店铺的客服界面（客户提问/查看FAQ/查看文档的页面），而非管理后台
+- 客户只能看到该店铺的公开内容（FAQ、文档、提问入口），不能看到管理功能
+- 如果 `store_id` 对应的店铺未开通客户支持（可调用 Marketplace 的 `/api/storefront-support/check` 验证），显示"该店铺未开通客户支持"提示页
 
 ---
 
@@ -329,3 +347,73 @@ Marketplace（异步）→ Service_Portal: POST /api/store-support/update-welcom
 Service_Portal → Marketplace: GET /api/storefront-support/check?storefront_id=123
 Marketplace → Service_Portal: {approved: true, store_name, welcome_message, software_name}
 ```
+
+### 客户进入店铺客服系统流程（新增）
+
+```
+客户在店铺主页点击客服图标
+    ↓
+[未登录] → 跳转 /user/login?redirect=/store/{slug}?support=1
+    ↓ 登录成功后重定向回店铺页，自动触发客服登录
+[已登录] → 前端 JS 调用 POST /api/storefront-support/customer-login {storefront_id}
+    ↓
+Marketplace → License_Server: POST /api/marketplace-auth {sn, email}
+License_Server → Marketplace: {token}
+Marketplace → Service_Portal: POST /api/auth/sn-login {token}
+Service_Portal → Marketplace: {login_ticket}
+Marketplace → 客户浏览器: {login_url}
+客户浏览器: 新标签页打开 /auth/ticket-login?ticket=xxx&scope=customer&store_id=123&product=vantagics-店铺名
+    ↓
+Service_Portal: 验证 ticket，创建客户会话，自动切换产品为该店铺
+    ↓ 产品名显示为 "vantagics-店铺名"
+Service_Portal: 重定向到该店铺的客服界面（FAQ/文档/提问页面）
+```
+
+**Marketplace 新增 API：**
+
+#### POST /api/storefront-support/customer-login
+
+已登录的市场客户调用此接口，获取进入店铺客服系统的登录 URL。
+
+**请求：**
+
+```json
+POST /api/storefront-support/customer-login
+Content-Type: application/json
+
+{ "storefront_id": 123 }
+```
+
+**成功响应（200）：**
+
+```json
+{
+  "success": true,
+  "login_url": "https://service.vantagedata.chat/auth/ticket-login?ticket=xxx&scope=customer&store_id=123&product=vantagics-%E5%BA%97%E9%93%BA%E5%90%8D"
+}
+```
+
+**失败响应：**
+
+```json
+// 未登录（401）
+{ "success": false, "error": "未登录", "need_login": true }
+
+// 店铺未开通客户支持（400）
+{ "success": false, "error": "该店铺未开通客户支持" }
+
+// 用户未绑定 Email（400）
+{ "success": false, "error": "请先绑定 Email" }
+
+// 认证失败（502）
+{ "success": false, "error": "认证失败，请稍后重试" }
+```
+
+**Service Portal 需要处理的逻辑（`scope=customer` 场景）：**
+
+1. 验证 ticket（与现有逻辑一致）
+2. 创建普通客户会话（非管理员角色）
+3. 解析 `product` 参数（URL decoded），将当前会话的产品切换为该值
+4. 解析 `store_id` 参数，将会话关联到该店铺
+5. 重定向到该店铺的客户支持界面（查看 FAQ、文档、提问的页面）
+6. 页面顶部产品名显示为 `product` 参数值（如 `vantagics-我的数据分析小铺`）

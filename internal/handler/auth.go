@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -461,7 +462,7 @@ func HandleTicketLogin(app *App) http.HandlerFunc {
 		// Support scope and store_id parameters for store management sessions
 		scope := r.URL.Query().Get("scope")
 		storeID := r.URL.Query().Get("store_id")
-		if scope == "store" && storeID != "" {
+		if (scope == "store" || scope == "customer") && storeID != "" {
 			// Validate store_id contains only digits
 			for _, c := range storeID {
 				if c < '0' || c > '9' {
@@ -469,7 +470,15 @@ func HandleTicketLogin(app *App) http.HandlerFunc {
 					return
 				}
 			}
-			redirectURL += "&scope=store&store_id=" + storeID
+			redirectURL += "&scope=" + scope + "&store_id=" + storeID
+
+			// For customer scope, pass the product parameter (URL-encoded product name)
+			if scope == "customer" {
+				product := r.URL.Query().Get("product")
+				if product != "" {
+					redirectURL += "&product=" + url.QueryEscape(product)
+				}
+			}
 		}
 
 		// Pass ticket (and optional scope/store_id) to frontend — the SPA will
@@ -491,6 +500,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			Ticket  string `json:"ticket"`
 			Scope   string `json:"scope"`
 			StoreID int64  `json:"store_id"`
+			Product string `json:"product"`
 		}
 		if err := ReadJSONBody(r, &req); err != nil {
 			WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -578,6 +588,23 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 					"scope":           "store",
 					"permissions":     []string{"documents", "pending", "knowledge", "faq"},
 				}
+			}
+		}
+
+		// If scope=customer and store_id is provided, include customer view info
+		if req.Scope == "customer" && req.StoreID > 0 && app.shopService != nil {
+			foundShop, _ := app.shopService.GetByStorefrontID(req.StoreID)
+			if foundShop != nil && foundShop.Status == shop.StatusApproved {
+				resp["store"] = map[string]interface{}{
+					"store_id":               req.StoreID,
+					"store_name":             foundShop.Name,
+					"welcome_message":        foundShop.WelcomeMessage,
+					"scope":                  "customer",
+					"product":                req.Product,
+					"shop_module_product_id": foundShop.ShopModuleProductID,
+				}
+			} else {
+				resp["store_error"] = "该店铺未开通客户支持"
 			}
 		}
 
