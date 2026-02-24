@@ -74,8 +74,9 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/auth/verify", secure(handler.HandleVerifyEmail(app)))
 	http.HandleFunc("/api/auth/forgot-password", secureRL(handler.HandleForgotPassword(app)))
 	http.HandleFunc("/api/auth/reset-password", secureRL(handler.HandleResetPassword(app)))
-	http.HandleFunc("/api/auth/sn-login", secureRL(handler.HandleSNLogin(app)))
-	http.HandleFunc("/api/auth/ticket-exchange", secureRL(handler.HandleTicketExchange(app)))
+	// SN login and ticket exchange are called by Market — no rate limit.
+	http.HandleFunc("/api/auth/sn-login", secure(handler.HandleSNLogin(app)))
+	http.HandleFunc("/api/auth/ticket-exchange", secure(handler.HandleTicketExchange(app)))
 	http.HandleFunc("/auth/ticket-login", secure(handler.HandleTicketLogin(app)))
 	http.HandleFunc("/api/captcha", secure(handler.HandleCaptcha()))
 	http.HandleFunc("/api/captcha/image", secureRL(handler.HandleCaptchaImage()))
@@ -194,13 +195,14 @@ func Register(app *handler.App) func() {
 
 	// ── Shop ──
 	// Auth route does NOT use ShopIsolation since the user is not yet authenticated.
-	http.HandleFunc("/api/shop/auth", secureRL(handler.HandleShopAuth(app)))
+	// Shop auth is called by Market — no rate limit.
+	http.HandleFunc("/api/shop/auth", secure(handler.HandleShopAuth(app)))
 	http.HandleFunc("/api/shop/activate", secureShop(handler.HandleShopActivate(app)))
 	http.HandleFunc("/api/shop/info", secureShop(handler.HandleShopInfo(app)))
 
-	// ── Store Support (Marketplace integration) ──
-	http.HandleFunc("/api/store-support/register", secureRL(handler.HandleStoreSupportRegister(app)))
-	http.HandleFunc("/api/store-support/update-welcome", secureRL(handler.HandleStoreSupportUpdateWelcome(app)))
+	// ── Store Support (Marketplace integration — no rate limit) ──
+	http.HandleFunc("/api/store-support/register", secure(handler.HandleStoreSupportRegister(app)))
+	http.HandleFunc("/api/store-support/update-welcome", secure(handler.HandleStoreSupportUpdateWelcome(app)))
 
 	// ── Admin shop management ──
 	http.HandleFunc("/api/admin/shops/", secure(handler.HandleAdminShopDelete(app)))
