@@ -49,7 +49,8 @@ Content-Type: application/json
   "token": "eyJhbGciOiJIUzI1NiIs...",
   "software_name": "vantagics",
   "store_name": "我的数据分析小铺",
-  "welcome_message": "欢迎来到我的数据分析小铺的客户支持"
+  "welcome_message": "欢迎来到我的数据分析小铺的客户支持",
+  "parent_product_id": "产品ID"
 }
 ```
 
@@ -58,6 +59,7 @@ Content-Type: application/json
 | token | string | 是 | License_Server 签发的 Auth_Token（JWT），用于验证请求来源身份 |
 | software_name | string | 是 | 固定为 `"vantagics"` |
 | store_name | string | 是 | 店铺名称，取自 Marketplace 的 `author_storefronts.store_name` |
+| parent_product_id | string | 是 | 父产品 ID，店铺将挂载在此产品下 |
 | welcome_message | string | 是 | 欢迎语。若店铺介绍非空则为店铺介绍原文；若为空则为默认值 `"欢迎来到 {store_name} 的客户支持"` |
 
 **成功响应（200）：**
@@ -317,7 +319,7 @@ Service Portal 验证 token 时需与 License_Server 使用相同的签发密钥
 店铺主 → Marketplace: POST /user/storefront/support/apply
 Marketplace → License_Server: POST /api/marketplace-auth {sn, email}
 License_Server → Marketplace: {token}
-Marketplace → Service_Portal: POST /api/store-support/register {token, software_name, store_name, welcome_message}
+Marketplace → Service_Portal: POST /api/store-support/register {token, software_name, store_name, welcome_message, parent_product_id}
 Service_Portal → Marketplace: {success: true}
 Marketplace: 创建 storefront_support_requests 记录 (status=pending)
 ```

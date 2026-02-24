@@ -55,6 +55,13 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 			})
 			return
 		}
+		if strings.TrimSpace(req.ParentProductID) == "" {
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
+				Success: false,
+				Message: "parent_product_id is required",
+			})
+			return
+		}
 
 		// Verify token using the existing SN login flow (which calls License_Server)
 		snResp, status, err := app.HandleSNLogin(req.Token)

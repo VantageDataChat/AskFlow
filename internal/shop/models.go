@@ -61,10 +61,11 @@ type ActivateResponse struct {
 // RegisterRequest is the input payload for POST /api/store-support/register.
 // Marketplace calls this to register a store's support system in Service Portal.
 type RegisterRequest struct {
-	Token          string `json:"token"`
-	SoftwareName   string `json:"software_name"`
-	StoreName      string `json:"store_name"`
-	WelcomeMessage string `json:"welcome_message"`
+	Token           string `json:"token"`
+	SoftwareName    string `json:"software_name"`
+	StoreName       string `json:"store_name"`
+	WelcomeMessage  string `json:"welcome_message"`
+	ParentProductID string `json:"parent_product_id"`
 }
 
 // RegisterResponse is the response for POST /api/store-support/register.

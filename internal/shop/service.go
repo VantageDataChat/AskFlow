@@ -291,6 +291,8 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 		return fmt.Errorf("failed to generate shop ID: %w", err)
 	}
 
+	parentProductID := strings.TrimSpace(req.ParentProductID)
+
 	now := time.Now()
 	welcomeMsg := req.WelcomeMessage
 	if welcomeMsg == "" {
@@ -299,8 +301,8 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 
 	_, err = s.writeDB.Exec(
 		`INSERT INTO shops (id, name, owner_id, storefront_id, software_name, description, welcome_message, status, parent_product_id, shop_module_product_id, created_at, updated_at)
-		 VALUES (?, ?, ?, 0, ?, '', ?, ?, '', '', ?, ?)`,
-		shopID, storeName, ownerID, softwareName, welcomeMsg, StatusPending, now, now,
+		 VALUES (?, ?, ?, 0, ?, '', ?, ?, ?, '', ?, ?)`,
+		shopID, storeName, ownerID, softwareName, welcomeMsg, StatusPending, parentProductID, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create shop record: %w", err)
