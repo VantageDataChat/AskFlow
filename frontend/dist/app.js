@@ -2868,19 +2868,56 @@
             });
     }
 
+    function isStoreOwnerSession() {
+        try {
+            var ctx = JSON.parse(localStorage.getItem('askflow_store_context'));
+            return ctx && ctx.scope === 'store';
+        } catch (e) { return false; }
+    }
+
+    function getStoreProductID() {
+        try {
+            var ctx = JSON.parse(localStorage.getItem('askflow_store_context'));
+            return (ctx && ctx.shop_module_product_id) || '';
+        } catch (e) { return ''; }
+    }
+
     function populateProductSelect(selectId, products) {
         var select = document.getElementById(selectId);
         if (!select) return;
         var currentVal = select.value;
-        select.innerHTML = '<option value="">' + i18n.t('admin_doc_product_public') + '</option>';
+        var isStore = isStoreOwnerSession();
+
+        select.innerHTML = '';
+        // Store owners: no "公共区" option — they can only see their own product
+        if (!isStore) {
+            select.innerHTML = '<option value="">' + i18n.t('admin_doc_product_public') + '</option>';
+        }
         for (var i = 0; i < products.length; i++) {
             var opt = document.createElement('option');
             opt.value = products[i].id;
             opt.textContent = products[i].name;
             select.appendChild(opt);
         }
-        // Restore previous selection if still valid
-        if (currentVal) select.value = currentVal;
+
+        // Store owners: force-select their product, hide the selector entirely
+        if (isStore) {
+            var storeProductID = getStoreProductID();
+            if (storeProductID) {
+                select.value = storeProductID;
+            } else if (products.length > 0) {
+                select.value = products[0].id;
+            }
+            // Hide the product selector row — store owners only have one product
+            var selectRow = select.closest('.admin-filter-row') || select.parentElement;
+            if (selectRow) selectRow.style.display = 'none';
+        } else {
+            // Restore previous selection if still valid
+            if (currentVal) select.value = currentVal;
+            var selectRow = select.closest('.admin-filter-row') || select.parentElement;
+            if (selectRow) selectRow.style.display = '';
+        }
+
         // Bind change event to refresh document list when product filter changes
         if (selectId === 'doc-product-select' && !select._boundChange) {
             select._boundChange = true;
@@ -5975,12 +6012,24 @@
                 var sel = document.getElementById('faq-admin-product-select');
                 if (!sel) return;
                 var products = data.products || [];
+                var isStore = isStoreOwnerSession();
                 sel.innerHTML = '';
                 for (var i = 0; i < products.length; i++) {
                     var opt = document.createElement('option');
                     opt.value = products[i].id;
                     opt.textContent = products[i].name;
                     sel.appendChild(opt);
+                }
+                // Store owners: force-select their product, hide the selector
+                if (isStore) {
+                    var storeProductID = getStoreProductID();
+                    if (storeProductID) {
+                        sel.value = storeProductID;
+                    } else if (products.length > 0) {
+                        sel.value = products[0].id;
+                    }
+                    var selectRow = sel.closest('.admin-filter-row') || sel.parentElement;
+                    if (selectRow) selectRow.style.display = 'none';
                 }
                 if (products.length > 0) loadAdminFAQ();
             });
