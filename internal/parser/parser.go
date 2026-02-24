@@ -179,6 +179,8 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 				if img.Filter == "FlateDecode" {
 					encoded := rawPixelsToJPEG(img.Data, img.Width, img.Height, img.ColorSpace)
 					if encoded == nil {
+						log.Printf("[PDF] page %d: skipping FlateDecode image (%dx%d, colorSpace=%s, dataLen=%d) — pixel format mismatch",
+							pageIdx+1, img.Width, img.Height, img.ColorSpace, len(img.Data))
 						continue
 					}
 					imgData = encoded
@@ -189,6 +191,8 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 					} else {
 						encoded := rawPixelsToJPEG(img.Data, img.Width, img.Height, img.ColorSpace)
 						if encoded == nil {
+							log.Printf("[PDF] page %d: skipping unknown-filter image (%dx%d, colorSpace=%s, dataLen=%d) — pixel format mismatch",
+								pageIdx+1, img.Width, img.Height, img.ColorSpace, len(img.Data))
 							continue
 						}
 						imgData = encoded
@@ -227,9 +231,12 @@ func rawPixelsToJPEG(data []byte, width, height int, colorSpace string) []byte {
 	}
 
 	isGray := strings.Contains(colorSpace, "Gray")
+	isCMYK := strings.Contains(colorSpace, "CMYK")
 	bytesPerPixel := 3 // DeviceRGB
 	if isGray {
 		bytesPerPixel = 1
+	} else if isCMYK {
+		bytesPerPixel = 4
 	}
 
 	rowBytes := width * bytesPerPixel
@@ -240,7 +247,29 @@ func rawPixelsToJPEG(data []byte, width, height int, colorSpace string) []byte {
 	hasPNGPredictor := len(data) == expectedPNG && len(data) != expectedPlain
 
 	if !hasPNGPredictor && len(data) < expectedPlain {
-		return nil
+		// Try other color space interpretations before giving up
+		// Some PDFs report wrong color space; try RGB if CMYK fails, etc.
+		for _, tryBPP := range []int{3, 4, 1} {
+			if tryBPP == bytesPerPixel {
+				continue
+			}
+			tryRow := width * tryBPP
+			tryExpected := tryRow * height
+			tryExpectedPNG := (tryRow + 1) * height
+			if len(data) == tryExpected || len(data) == tryExpectedPNG {
+				bytesPerPixel = tryBPP
+				rowBytes = tryRow
+				expectedPlain = tryExpected
+				expectedPNG = tryExpectedPNG
+				hasPNGPredictor = len(data) == expectedPNG && len(data) != expectedPlain
+				isGray = tryBPP == 1
+				isCMYK = tryBPP == 4
+				break
+			}
+		}
+		if !hasPNGPredictor && len(data) < width*bytesPerPixel*height {
+			return nil
+		}
 	}
 
 	// If PNG predictor, decode the filter bytes to get raw pixels
@@ -265,6 +294,23 @@ func rawPixelsToJPEG(data []byte, width, height int, colorSpace string) []byte {
 				img.Pix[dstOff+1] = g
 				img.Pix[dstOff+2] = g
 				img.Pix[dstOff+3] = 255
+				dstOff += 4
+			}
+		}
+	} else if isCMYK {
+		for y := 0; y < height; y++ {
+			srcOff := y * width * 4
+			dstOff := y * img.Stride
+			for x := 0; x < width; x++ {
+				c := float64(pixels[srcOff]) / 255.0
+				m := float64(pixels[srcOff+1]) / 255.0
+				yy := float64(pixels[srcOff+2]) / 255.0
+				k := float64(pixels[srcOff+3]) / 255.0
+				img.Pix[dstOff] = uint8((1 - c) * (1 - k) * 255)
+				img.Pix[dstOff+1] = uint8((1 - m) * (1 - k) * 255)
+				img.Pix[dstOff+2] = uint8((1 - yy) * (1 - k) * 255)
+				img.Pix[dstOff+3] = 255
+				srcOff += 4
 				dstOff += 4
 			}
 		}
