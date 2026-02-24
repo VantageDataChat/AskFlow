@@ -546,6 +546,25 @@
             'admin_products_create_failed': '创建失败',
             'admin_products_load_failed': '加载产品列表失败',
 
+            // Shop management
+            'admin_nav_shops': '店铺管理',
+            'admin_shops_title': '店铺管理',
+            'admin_shops_list_legend': '产品下的店铺',
+            'admin_shops_select_product': '选择产品',
+            'admin_shops_col_name': '店铺名称',
+            'admin_shops_col_status': '状态',
+            'admin_shops_col_owner': '店主ID',
+            'admin_shops_col_created': '创建时间',
+            'admin_shops_col_actions': '操作',
+            'admin_shops_empty': '该产品下暂无店铺',
+            'admin_shops_status_approved': '已批准',
+            'admin_shops_status_pending': '待审批',
+            'admin_shops_delete_btn': '删除',
+            'admin_shops_delete_confirm': '确定要删除店铺"{name}"吗？',
+            'admin_shops_retain_knowledge_confirm': '是否保留店铺"{name}"已上传的知识数据？\n\n点击"确定"保留知识数据，点击"取消"同时删除知识数据。',
+            'admin_shops_deleted': '店铺已删除',
+            'admin_shops_delete_failed': '删除店铺失败',
+
             // Multimodal
             'admin_nav_multimodal': '多模态',
             'admin_multimodal_title': '多模态配置',
@@ -1214,6 +1233,25 @@
             'admin_products_created': 'Product created successfully',
             'admin_products_create_failed': 'Creation failed',
             'admin_products_load_failed': 'Failed to load products',
+
+            // Shop management
+            'admin_nav_shops': 'Shops',
+            'admin_shops_title': 'Shop Management',
+            'admin_shops_list_legend': 'Shops under Product',
+            'admin_shops_select_product': 'Select Product',
+            'admin_shops_col_name': 'Shop Name',
+            'admin_shops_col_status': 'Status',
+            'admin_shops_col_owner': 'Owner ID',
+            'admin_shops_col_created': 'Created',
+            'admin_shops_col_actions': 'Actions',
+            'admin_shops_empty': 'No shops under this product',
+            'admin_shops_status_approved': 'Approved',
+            'admin_shops_status_pending': 'Pending',
+            'admin_shops_delete_btn': 'Delete',
+            'admin_shops_delete_confirm': 'Delete shop "{name}"?',
+            'admin_shops_retain_knowledge_confirm': 'Retain uploaded knowledge data for shop "{name}"?\n\nClick OK to keep knowledge data, Cancel to delete everything.',
+            'admin_shops_deleted': 'Shop deleted',
+            'admin_shops_delete_failed': 'Failed to delete shop',
 
             // Multimodal
             'admin_nav_multimodal': 'Multimodal',

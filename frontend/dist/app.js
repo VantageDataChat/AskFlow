@@ -2143,6 +2143,7 @@
         if (tab === 'customers') { loadAdminCustomers(); i18n.applyI18nToPage(); }
         if (tab === 'batchimport') { loadBatchImportProductSelector(); }
         if (tab === 'faq') { loadFAQAdminProductSelector(); }
+        if (tab === 'shops') { loadShopsProductSelector(); }
     };
 
     // --- Settings Sub-Tab Switching ---
@@ -4972,6 +4973,95 @@
         checkboxes.forEach(function (cb) { ids.push(cb.value); });
         return ids;
     }
+
+    // --- Admin Shop Management ---
+
+    function loadShopsProductSelector() {
+        var sel = document.getElementById('shops-product-select');
+        var prevValue = sel ? sel.value : '';
+        adminFetch('/api/products')
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (!sel) return;
+                var products = data.products || [];
+                sel.innerHTML = '';
+                for (var i = 0; i < products.length; i++) {
+                    var opt = document.createElement('option');
+                    opt.value = products[i].id;
+                    opt.textContent = products[i].name;
+                    sel.appendChild(opt);
+                }
+                if (prevValue && sel.querySelector('option[value="' + prevValue + '"]')) {
+                    sel.value = prevValue;
+                }
+                if (products.length > 0) loadAdminShops();
+            })
+            .catch(function () {
+                if (sel) sel.innerHTML = '';
+                renderAdminShops([]);
+            });
+    }
+
+    window.loadAdminShops = function () {
+        var sel = document.getElementById('shops-product-select');
+        var productID = sel ? sel.value : '';
+        if (!productID) {
+            renderAdminShops([]);
+            return;
+        }
+        adminFetch('/api/admin/shops?product_id=' + encodeURIComponent(productID))
+            .then(function (res) {
+                if (!res.ok) throw new Error('load failed');
+                return res.json();
+            })
+            .then(function (data) {
+                renderAdminShops(data.shops || []);
+            })
+            .catch(function () {
+                renderAdminShops([]);
+            });
+    };
+
+    function renderAdminShops(shops) {
+        var tbody = document.getElementById('admin-shops-tbody');
+        if (!tbody) return;
+        if (!shops || shops.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">' + i18n.t('admin_shops_empty') + '</td></tr>';
+            return;
+        }
+        var html = '';
+        for (var i = 0; i < shops.length; i++) {
+            var s = shops[i];
+            var createdAt = s.created_at ? new Date(s.created_at).toLocaleString() : '-';
+            var statusLabel = s.status === 'approved' ? '✅ ' + i18n.t('admin_shops_status_approved') : '⏳ ' + i18n.t('admin_shops_status_pending');
+            html += '<tr>' +
+                '<td>' + escapeHtml(s.name) + '</td>' +
+                '<td>' + statusLabel + '</td>' +
+                '<td>' + escapeHtml(String(s.owner_id || '-')) + '</td>' +
+                '<td>' + escapeHtml(createdAt) + '</td>' +
+                '<td>' +
+                    '<button class="btn-danger btn-sm" onclick="deleteShop(\'' + escapeHtml(s.id) + '\', \'' + escapeHtml(s.name) + '\')">' + i18n.t('admin_shops_delete_btn') + '</button>' +
+                '</td>' +
+            '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    window.deleteShop = function (id, name) {
+        if (!confirm(i18n.t('admin_shops_delete_confirm', { name: name }))) return;
+        var retainKnowledge = confirm(i18n.t('admin_shops_retain_knowledge_confirm', { name: name }));
+        adminFetch('/api/admin/shops/' + encodeURIComponent(id) + '?retain_knowledge=' + retainKnowledge, {
+            method: 'DELETE'
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_shops_delete_failed')); });
+            showAdminToast(i18n.t('admin_shops_deleted'), 'success');
+            loadAdminShops();
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_shops_delete_failed'), 'error');
+        });
+    };
 
     // --- Admin User Management ---
 
