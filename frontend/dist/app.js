@@ -2475,6 +2475,22 @@
         var bansNav = document.querySelector('.admin-nav-item[data-tab="bans"]');
         var customersNav = document.querySelector('.admin-nav-item[data-tab="customers"]');
         var batchimportNav = document.querySelector('.admin-nav-item[data-tab="batchimport"]');
+        var shopsNav = document.querySelector('.admin-nav-item[data-tab="shops"]');
+        var multimodalNav = document.querySelector('.admin-nav-item[data-tab="multimodal"]');
+
+        // Store owner: only show documents, pending, knowledge, FAQ
+        if (adminRole === 'store_owner') {
+            if (settingsNav) settingsNav.style.display = 'none';
+            if (usersNav) usersNav.style.display = 'none';
+            if (productsNav) productsNav.style.display = 'none';
+            if (bansNav) bansNav.style.display = 'none';
+            if (customersNav) customersNav.style.display = 'none';
+            if (batchimportNav) batchimportNav.style.display = 'none';
+            if (shopsNav) shopsNav.style.display = 'none';
+            if (multimodalNav) multimodalNav.style.display = 'none';
+            showStoreOwnerBanner();
+            return;
+        }
 
         // Anonymous viewer: show all tabs (like super_admin) for demo purposes,
         // but show read-only banner. Backend rejects all write operations.
@@ -2521,6 +2537,30 @@
             footer.insertBefore(banner, versionInfo);
         } else {
             footer.insertBefore(banner, footer.firstChild);
+        }
+    }
+
+    function showStoreOwnerBanner() {
+        if (document.getElementById('store-owner-banner')) return;
+        var storeCtx = null;
+        try { storeCtx = JSON.parse(localStorage.getItem('askflow_store_context')); } catch (e) {}
+        var storeName = storeCtx ? storeCtx.store_name : '';
+        var footer = document.querySelector('.admin-sidebar-footer');
+        if (!footer) return;
+        var banner = document.createElement('div');
+        banner.id = 'store-owner-banner';
+        banner.style.cssText = 'background:#eff6ff;color:#2563eb;padding:6px 10px;text-align:center;font-size:12px;font-weight:600;border:2px solid #2563eb;border-radius:6px;margin-bottom:6px;';
+        banner.textContent = i18n.t('store_owner_banner', { name: storeName }) || ('🏪 ' + storeName);
+        var versionInfo = footer.querySelector('.admin-version-info');
+        if (versionInfo) {
+            footer.insertBefore(banner, versionInfo);
+        } else {
+            footer.insertBefore(banner, footer.firstChild);
+        }
+        // Also update the admin username display
+        var usernameDisplay = document.getElementById('admin-username-display');
+        if (usernameDisplay && storeName) {
+            usernameDisplay.textContent = storeName;
         }
     }
 
@@ -4448,10 +4488,11 @@
                 fetchProducts();
 
                 // Handle store scope — store owner management session
-                // Auto-select the store's product and redirect to chat
-                if (data.store && data.store.scope === 'store') {
+                // Save admin session and redirect to admin panel
+                if (data.store && data.store.scope === 'store' && data.admin_session) {
+                    saveAdminSession(data.admin_session, data.admin_user);
                     localStorage.setItem('askflow_store_context', JSON.stringify(data.store));
-                    window.history.replaceState({}, '', '/chat');
+                    window.history.replaceState({}, '', '/admin-panel');
                     handleRoute();
                     return;
                 }
@@ -5403,6 +5444,7 @@
         adminRole = '';
         adminPermissions = [];
         localStorage.removeItem('admin_role');
+        localStorage.removeItem('askflow_store_context');
         clearAdminSession();
         navigate(adminLoginRoute);
     };

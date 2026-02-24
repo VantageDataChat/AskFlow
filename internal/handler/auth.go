@@ -550,7 +550,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			},
 		}
 
-		// If scope=store and store_id is provided, include store management info
+		// If scope=store and store_id is provided, create store management admin session
 		if req.Scope == "store" && req.StoreID > 0 && app.shopService != nil {
 			var foundShop *shop.Shop
 
@@ -581,13 +581,30 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			}
 
 			if foundShop != nil {
+				// Create an admin session for the store owner so they can access the admin panel
+				storeOwnerID := "store_owner_" + foundShop.ID
+				_ = app.sessionManager.DeleteSession(sessionID) // clean up the regular user session
+				adminSession, err := app.sessionManager.CreateSession(storeOwnerID)
+				if err != nil {
+					WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+						"success": false, "message": "internal error",
+					})
+					return
+				}
+
+				resp["admin_session"] = adminSession
+				resp["admin_user"] = map[string]string{
+					"username": foundShop.Name,
+					"provider": "store_owner",
+				}
 				resp["store"] = map[string]interface{}{
 					"store_id":               req.StoreID,
 					"store_name":             foundShop.Name,
 					"welcome_message":        foundShop.WelcomeMessage,
 					"scope":                  "store",
-					"permissions":             []string{"documents", "pending", "knowledge", "faq"},
+					"permissions":            []string{"documents", "pending", "knowledge", "faq"},
 					"shop_module_product_id": foundShop.ShopModuleProductID,
+					"parent_product_id":      foundShop.ParentProductID,
 				}
 			}
 		}

@@ -359,6 +359,9 @@ func (a *App) GetAdminRole(userID string) string {
 	if userID == "anonymous_viewer" {
 		return "anonymous_viewer"
 	}
+	if strings.HasPrefix(userID, "store_owner_") {
+		return "store_owner"
+	}
 	if strings.HasPrefix(userID, "admin_") {
 		subID := strings.TrimPrefix(userID, "admin_")
 		var role string
@@ -375,6 +378,9 @@ func (a *App) GetAdminRole(userID string) string {
 func (a *App) GetAdminPermissions(userID string) []string {
 	if userID == "admin" {
 		return []string{"batch_import"}
+	}
+	if strings.HasPrefix(userID, "store_owner_") {
+		return []string{"documents", "pending", "knowledge", "faq"}
 	}
 	if strings.HasPrefix(userID, "admin_") {
 		subID := strings.TrimPrefix(userID, "admin_")
@@ -394,9 +400,9 @@ func (a *App) GetAdminPermissions(userID string) []string {
 	return nil
 }
 
-// IsAdminSession checks if a user ID belongs to any admin (super or sub).
+// IsAdminSession checks if a user ID belongs to any admin (super or sub) or store owner.
 func (a *App) IsAdminSession(userID string) bool {
-	return userID == "admin" || strings.HasPrefix(userID, "admin_") || userID == "anonymous_viewer"
+	return userID == "admin" || strings.HasPrefix(userID, "admin_") || userID == "anonymous_viewer" || strings.HasPrefix(userID, "store_owner_")
 }
 
 // AdminLogin verifies the admin username and password and creates a session.
@@ -1445,6 +1451,23 @@ func (a *App) GetProductsByAdminUserID(adminUserID string) ([]product.Product, e
 	// Super admin ("admin") has access to all products
 	if adminUserID == "admin" {
 		return a.productService.List()
+	}
+	// Store owner: only has access to their shop's module product
+	if strings.HasPrefix(adminUserID, "store_owner_") {
+		shopID := strings.TrimPrefix(adminUserID, "store_owner_")
+		if a.shopService != nil {
+			var moduleProductID string
+			err := a.readDB.QueryRow(
+				`SELECT shop_module_product_id FROM shops WHERE id = ?`, shopID,
+			).Scan(&moduleProductID)
+			if err == nil && moduleProductID != "" {
+				p, err := a.productService.GetByID(moduleProductID)
+				if err == nil && p != nil {
+					return []product.Product{*p}, nil
+				}
+			}
+		}
+		return []product.Product{}, nil
 	}
 	// Sub-admin session stores "admin_<actual_id>", strip prefix for DB lookup
 	actualID := strings.TrimPrefix(adminUserID, "admin_")
