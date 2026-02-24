@@ -137,6 +137,15 @@
             } else {
                 showPage('login');
                 loadLoginCaptcha();
+                // Show error detail from ticket-login failure (if present in URL)
+                var loginParams = new URLSearchParams(window.location.search);
+                var loginError = loginParams.get('error');
+                var loginDetail = loginParams.get('detail');
+                if (loginError) {
+                    var errorEl = document.getElementById('user-login-error');
+                    var msg = loginDetail ? decodeURIComponent(loginDetail) : loginError;
+                    if (errorEl) { errorEl.textContent = msg; errorEl.classList.remove('hidden'); }
+                }
             }
         } else if (route === '/register') {
             if (session) {
@@ -261,9 +270,11 @@
         toast.textContent = message;
         toast.className = 'toast toast-' + type;
         if (toastTimer) clearTimeout(toastTimer);
+        // Error toasts stay longer (8s) so the user can read the message
+        var duration = (type === 'error') ? 8000 : 3000;
         toastTimer = setTimeout(function () {
             toast.classList.add('hidden');
-        }, 3000);
+        }, duration);
     }
 
     // --- Captcha ---
@@ -4680,8 +4691,9 @@
             }
         })
         .catch(function (err) {
+            var detail = encodeURIComponent(err.message || 'unknown');
             showToast(err.message || 'ticket login failed', 'error');
-            window.history.replaceState({}, '', '/login?error=ticket_failed');
+            window.history.replaceState({}, '', '/login?error=ticket_failed&detail=' + detail);
             handleRoute();
         });
         return true;

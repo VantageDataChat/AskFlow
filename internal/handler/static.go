@@ -78,7 +78,12 @@ func SpaHandler(dir string) http.Handler {
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		// Fallback: serve index.html for SPA routing
+		// Fallback: serve index.html for SPA routing.
+		// Override cache headers — the SPA entry point must never be cached
+		// so that ticket-login redirects and other dynamic URLs always get fresh HTML.
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
 		http.ServeFile(w, r, indexPath)
 	})
 }
