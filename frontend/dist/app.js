@@ -2478,8 +2478,10 @@
         var shopsNav = document.querySelector('.admin-nav-item[data-tab="shops"]');
         var multimodalNav = document.querySelector('.admin-nav-item[data-tab="multimodal"]');
 
-        // Store owner: only show documents, pending, knowledge, FAQ
-        if (adminRole === 'store_owner') {
+        // Store owner (editor with store context): only show documents, pending, knowledge, FAQ
+        var storeCtx = null;
+        try { storeCtx = JSON.parse(localStorage.getItem('askflow_store_context')); } catch (e) {}
+        if (storeCtx && storeCtx.scope === 'store') {
             if (settingsNav) settingsNav.style.display = 'none';
             if (usersNav) usersNav.style.display = 'none';
             if (productsNav) productsNav.style.display = 'none';

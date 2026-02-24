@@ -359,9 +359,6 @@ func (a *App) GetAdminRole(userID string) string {
 	if userID == "anonymous_viewer" {
 		return "anonymous_viewer"
 	}
-	if strings.HasPrefix(userID, "store_owner_") {
-		return "store_owner"
-	}
 	if strings.HasPrefix(userID, "admin_") {
 		subID := strings.TrimPrefix(userID, "admin_")
 		var role string
@@ -378,9 +375,6 @@ func (a *App) GetAdminRole(userID string) string {
 func (a *App) GetAdminPermissions(userID string) []string {
 	if userID == "admin" {
 		return []string{"batch_import"}
-	}
-	if strings.HasPrefix(userID, "store_owner_") {
-		return []string{"documents", "pending", "knowledge", "faq"}
 	}
 	if strings.HasPrefix(userID, "admin_") {
 		subID := strings.TrimPrefix(userID, "admin_")
@@ -400,9 +394,9 @@ func (a *App) GetAdminPermissions(userID string) []string {
 	return nil
 }
 
-// IsAdminSession checks if a user ID belongs to any admin (super or sub) or store owner.
+// IsAdminSession checks if a user ID belongs to any admin (super or sub).
 func (a *App) IsAdminSession(userID string) bool {
-	return userID == "admin" || strings.HasPrefix(userID, "admin_") || userID == "anonymous_viewer" || strings.HasPrefix(userID, "store_owner_")
+	return userID == "admin" || strings.HasPrefix(userID, "admin_") || userID == "anonymous_viewer"
 }
 
 // AdminLogin verifies the admin username and password and creates a session.
@@ -1173,6 +1167,65 @@ func (a *App) CreateAdminUser(username, password, role string, permissions []str
 	return &AdminUserInfo{ID: id, Username: username, Role: role, Permissions: filteredPerms}, nil
 }
 
+// FindOrCreateStoreOwnerAdmin finds or creates a sub-admin account for a store owner.
+// The sub-admin is identified by username "store_{shopID}" and has role "editor".
+// It also ensures the shop's module product is assigned to this sub-admin.
+func (a *App) FindOrCreateStoreOwnerAdmin(shopID, shopName, moduleProductID string) (subAdminID string, err error) {
+	username := "store_" + shopID
+
+	// Try to find existing sub-admin
+	err = a.readDB.QueryRow(
+		`SELECT id FROM admin_users WHERE username = ?`, username,
+	).Scan(&subAdminID)
+	if err == nil {
+		// Existing sub-admin found — update product assignment if moduleProductID is set
+		if moduleProductID != "" {
+			_ = a.productService.AssignAdminUser(subAdminID, []string{moduleProductID})
+		}
+		return subAdminID, nil
+	}
+
+	// Create new sub-admin with a random unusable password
+	randomBytes := make([]byte, 32)
+	rand.Read(randomBytes)
+	unusableHash := "$unusable$" + hex.EncodeToString(randomBytes)
+
+	subAdminID, err = generateToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate sub-admin ID: %w", err)
+	}
+
+	_, err = a.db.Exec(
+		`INSERT INTO admin_users (id, username, password_hash, role, permissions) VALUES (?, ?, ?, 'editor', '')`,
+		subAdminID, username, unusableHash,
+	)
+	if err != nil {
+		// Handle race condition: another request may have created it
+		if strings.Contains(err.Error(), "UNIQUE") {
+			err = a.readDB.QueryRow(
+				`SELECT id FROM admin_users WHERE username = ?`, username,
+			).Scan(&subAdminID)
+			if err != nil {
+				return "", fmt.Errorf("failed to find sub-admin after conflict: %w", err)
+			}
+		} else {
+			return "", fmt.Errorf("failed to create store owner sub-admin: %w", err)
+		}
+	}
+
+	// Assign the shop's module product to this sub-admin
+	if moduleProductID != "" {
+		if err := a.productService.AssignAdminUser(subAdminID, []string{moduleProductID}); err != nil {
+			log.Printf("[StoreOwnerAdmin] failed to assign product %s to sub-admin %s: %v", moduleProductID, subAdminID, err)
+		}
+	}
+
+	log.Printf("[StoreOwnerAdmin] created sub-admin %q (id=%s) for shop %q, product=%s",
+		username, subAdminID, shopName, moduleProductID)
+
+	return subAdminID, nil
+}
+
 // ListAdminUsers returns all admin sub-accounts.
 func (a *App) ListAdminUsers() ([]AdminUserInfo, error) {
 	rows, err := a.readDB.Query(`SELECT id, username, role, created_at, COALESCE(permissions,'') FROM admin_users ORDER BY created_at DESC`)
@@ -1451,23 +1504,6 @@ func (a *App) GetProductsByAdminUserID(adminUserID string) ([]product.Product, e
 	// Super admin ("admin") has access to all products
 	if adminUserID == "admin" {
 		return a.productService.List()
-	}
-	// Store owner: only has access to their shop's module product
-	if strings.HasPrefix(adminUserID, "store_owner_") {
-		shopID := strings.TrimPrefix(adminUserID, "store_owner_")
-		if a.shopService != nil {
-			var moduleProductID string
-			err := a.readDB.QueryRow(
-				`SELECT shop_module_product_id FROM shops WHERE id = ?`, shopID,
-			).Scan(&moduleProductID)
-			if err == nil && moduleProductID != "" {
-				p, err := a.productService.GetByID(moduleProductID)
-				if err == nil && p != nil {
-					return []product.Product{*p}, nil
-				}
-			}
-		}
-		return []product.Product{}, nil
 	}
 	// Sub-admin session stores "admin_<actual_id>", strip prefix for DB lookup
 	actualID := strings.TrimPrefix(adminUserID, "admin_")

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -581,10 +582,22 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			}
 
 			if foundShop != nil {
-				// Create an admin session for the store owner so they can access the admin panel
-				storeOwnerID := "store_owner_" + foundShop.ID
-				_ = app.sessionManager.DeleteSession(sessionID) // clean up the regular user session
-				adminSession, err := app.sessionManager.CreateSession(storeOwnerID)
+				// Find or create a sub-admin account for the store owner
+				subAdminID, err := app.FindOrCreateStoreOwnerAdmin(
+					foundShop.ID, foundShop.Name, foundShop.ShopModuleProductID,
+				)
+				if err != nil {
+					log.Printf("[TicketExchange] store owner admin error: %v", err)
+					WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+						"success": false, "message": "internal error",
+					})
+					return
+				}
+
+				// Delete the regular user session and create an admin session
+				_ = app.sessionManager.DeleteSession(sessionID)
+				adminSessionUserID := "admin_" + subAdminID
+				adminSession, err := app.sessionManager.CreateSession(adminSessionUserID)
 				if err != nil {
 					WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
 						"success": false, "message": "internal error",
@@ -595,7 +608,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 				resp["admin_session"] = adminSession
 				resp["admin_user"] = map[string]string{
 					"username": foundShop.Name,
-					"provider": "store_owner",
+					"provider": "admin",
 				}
 				resp["store"] = map[string]interface{}{
 					"store_id":               req.StoreID,
