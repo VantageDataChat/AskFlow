@@ -81,35 +81,65 @@ func ShopIsolation(sessionMgr *auth.SessionManager, readDB *sql.DB, shopSvc *sho
 				return
 			}
 
-			// 3. Look up user email where provider='sn'.
-			var email string
-			err = readDB.QueryRow(
-				"SELECT email FROM users WHERE id = ? AND provider = 'sn'",
-				session.UserID,
-			).Scan(&email)
-			if err != nil {
-				// Not an SN user — pass through.
-				next(w, r)
-				return
-			}
+			// 3. Resolve the shop for this session.
+			//    Two paths: (a) admin session for a store owner ("admin_xxx" → admin_users
+			//    username "store_{shopID}"), or (b) regular SN user session.
+			var s *shop.Shop
 
-			// 4. Look up sn_users.id from email.
-			var ownerID int64
-			err = readDB.QueryRow(
-				"SELECT id FROM sn_users WHERE email = ?", email,
-			).Scan(&ownerID)
-			if err != nil {
-				log.Printf("[ShopIsolation] failed to resolve sn_user for email %s: %v", email, err)
-				next(w, r)
-				return
-			}
+			if strings.HasPrefix(session.UserID, "admin_") {
+				// Path (a): Admin session — look up admin_users to find "store_{shopID}" username.
+				subID := strings.TrimPrefix(session.UserID, "admin_")
+				var username string
+				err = readDB.QueryRow(
+					"SELECT username FROM admin_users WHERE id = ?", subID,
+				).Scan(&username)
+				if err != nil {
+					// Not a known admin sub-account — pass through.
+					next(w, r)
+					return
+				}
+				if strings.HasPrefix(username, "store_") {
+					shopID := strings.TrimPrefix(username, "store_")
+					s, err = shopSvc.GetByID(shopID)
+					if err != nil {
+						log.Printf("[ShopIsolation] failed to get shop by ID %s: %v", shopID, err)
+						next(w, r)
+						return
+					}
+				} else {
+					// Non-store admin — pass through.
+					next(w, r)
+					return
+				}
+			} else {
+				// Path (b): Regular SN user session — resolve via email → sn_users → shop.
+				var email string
+				err = readDB.QueryRow(
+					"SELECT email FROM users WHERE id = ? AND provider = 'sn'",
+					session.UserID,
+				).Scan(&email)
+				if err != nil {
+					// Not an SN user — pass through.
+					next(w, r)
+					return
+				}
 
-			// 5. Look up shop by owner ID.
-			s, err := shopSvc.GetByOwnerID(ownerID)
-			if err != nil {
-				log.Printf("[ShopIsolation] failed to get shop for owner %d: %v", ownerID, err)
-				next(w, r)
-				return
+				var ownerID int64
+				err = readDB.QueryRow(
+					"SELECT id FROM sn_users WHERE email = ?", email,
+				).Scan(&ownerID)
+				if err != nil {
+					log.Printf("[ShopIsolation] failed to resolve sn_user for email %s: %v", email, err)
+					next(w, r)
+					return
+				}
+
+				s, err = shopSvc.GetByOwnerID(ownerID)
+				if err != nil {
+					log.Printf("[ShopIsolation] failed to get shop for owner %d: %v", ownerID, err)
+					next(w, r)
+					return
+				}
 			}
 
 			// 6. If shop exists and is approved, inject shop_module_product_id.

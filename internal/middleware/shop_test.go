@@ -77,6 +77,14 @@ func setupShopMiddlewareTestDB(t *testing.T) *sql.DB {
 			created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`CREATE TABLE IF NOT EXISTS admin_users (
+			id            TEXT PRIMARY KEY,
+			username      TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role          TEXT NOT NULL DEFAULT 'editor',
+			permissions   TEXT DEFAULT '',
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 
 	for _, ddl := range tables {
@@ -277,6 +285,58 @@ func TestShopIsolation_PendingShop(t *testing.T) {
 
 	if !called {
 		t.Error("handler was not called")
+	}
+}
+
+func TestShopIsolation_AdminSession_StoreOwner(t *testing.T) {
+	db := setupShopMiddlewareTestDB(t)
+	defer db.Close()
+
+	sm := auth.NewSessionManager(db, db, 24*time.Hour)
+	shopSvc := shop.NewShopService(db, db, nil, nil)
+
+	// Set up: parent product, child product, sn_user, approved shop, admin_users record.
+	moduleProductID := "child-prod-admin-1"
+	db.Exec(`INSERT INTO products (id, name) VALUES ('parent-prod-admin', 'Parent')`)
+	db.Exec(`INSERT INTO products (id, name, welcome_message) VALUES (?, 'Shop Module Admin', 'welcome')`, moduleProductID)
+	db.Exec(`INSERT INTO sn_users (email, display_name, sn) VALUES ('admin_owner@test.com', 'AdminOwner', 'SN-A1')`)
+	var ownerID int64
+	db.QueryRow(`SELECT id FROM sn_users WHERE email = 'admin_owner@test.com'`).Scan(&ownerID)
+	shopID := "shop-admin-1"
+	db.Exec(`INSERT INTO shops (id, name, owner_id, software_name, status, parent_product_id, shop_module_product_id)
+		VALUES (?, 'Admin Test Shop', ?, 'vantagics', 'approved', 'parent-prod-admin', ?)`, shopID, ownerID, moduleProductID)
+
+	// Create admin_users record with username "store_{shopID}"
+	subAdminID := "sub-admin-id-1"
+	db.Exec(`INSERT INTO admin_users (id, username, password_hash, role, permissions) VALUES (?, ?, '$unusable$xxx', 'editor', 'documents,pending,knowledge,faq')`,
+		subAdminID, "store_"+shopID)
+
+	// Create admin session with UserID = "admin_" + subAdminID
+	adminSession, err := sm.CreateSession("admin_" + subAdminID)
+	if err != nil {
+		t.Fatalf("create admin session: %v", err)
+	}
+
+	var capturedProductID string
+	var capturedIsOwner bool
+
+	handler := ShopIsolation(sm, db, shopSvc)(func(w http.ResponseWriter, r *http.Request) {
+		capturedProductID, _ = GetShopModuleProductID(r.Context())
+		capturedIsOwner = IsShopOwner(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer "+adminSession.ID)
+	rec := httptest.NewRecorder()
+
+	handler(rec, req)
+
+	if capturedProductID != moduleProductID {
+		t.Errorf("expected product ID %q, got %q", moduleProductID, capturedProductID)
+	}
+	if !capturedIsOwner {
+		t.Error("expected IsShopOwner to be true for admin session store owner")
 	}
 }
 

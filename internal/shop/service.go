@@ -196,6 +196,25 @@ func (s *ShopService) getByOwnerID(ownerID int64) (*Shop, error) {
 	return &shop, nil
 }
 
+// GetByID returns the shop with the given ID.
+// Returns nil, nil if no shop is found.
+func (s *ShopService) GetByID(shopID string) (*Shop, error) {
+	var sh Shop
+	err := s.readDB.QueryRow(
+		`SELECT id, name, owner_id, storefront_id, software_name, description, welcome_message, status, parent_product_id, shop_module_product_id, created_at, updated_at
+		 FROM shops WHERE id = ? LIMIT 1`,
+		shopID,
+	).Scan(&sh.ID, &sh.Name, &sh.OwnerID, &sh.StorefrontID, &sh.SoftwareName, &sh.Description,
+		&sh.WelcomeMessage, &sh.Status, &sh.ParentProductID, &sh.ShopModuleProductID, &sh.CreatedAt, &sh.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &sh, nil
+}
+
 // GetByOwnerID returns the shop associated with the given owner ID.
 // Returns nil, nil if no shop is found.
 func (s *ShopService) GetByOwnerID(ownerID int64) (*Shop, error) {
