@@ -1802,8 +1802,18 @@ func (a *App) UnbanCustomer(email string) error {
 }
 
 // SNLoginRequest is the request body for POST /api/auth/sn-login.
+// Accepts both "token" and "license_token" for backward compatibility with Marketplace.
 type SNLoginRequest struct {
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	LicenseToken string `json:"license_token"`
+}
+
+// GetToken returns the effective token, preferring "token" over "license_token".
+func (r *SNLoginRequest) GetToken() string {
+	if r.Token != "" {
+		return r.Token
+	}
+	return r.LicenseToken
 }
 
 // SNLoginResponse is the response for POST /api/auth/sn-login.

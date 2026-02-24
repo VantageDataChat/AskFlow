@@ -93,7 +93,7 @@ Content-Type: application/json
 
 | 字段 | 类型 | 必填 | 来源 / 说明 |
 |------|------|------|-------------|
-| license_token | string | 是 | `POST license.vantagedata.chat/api/marketplace-auth` 返回的 token |
+| license_token | string | 是 | `POST license.vantagedata.chat/api/marketplace-auth` 返回的 token（也接受 `token` 字段名） |
 
 **成功响应 (200)：**
 

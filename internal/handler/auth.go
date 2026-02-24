@@ -427,7 +427,7 @@ func HandleSNLogin(app *App) http.HandlerFunc {
 			WriteJSON(w, http.StatusBadRequest, SNLoginResponse{Success: false, Message: "token is required"})
 			return
 		}
-		resp, status, err := app.HandleSNLogin(req.Token)
+		resp, status, err := app.HandleSNLogin(req.GetToken())
 		if err != nil {
 			WriteJSON(w, http.StatusInternalServerError, SNLoginResponse{Success: false, Message: "internal error"})
 			return
