@@ -2531,10 +2531,7 @@ a.chat-source-download:hover {
     padding: 2.5rem 2.5rem 2rem;
 }
 
-#page-admin-login .login-container {
-    align-items: center;
-}
-
+#page-admin-login .login-container,
 #page-setup .login-container,
 #page-verify .login-container,
 #page-reset-password .login-container {

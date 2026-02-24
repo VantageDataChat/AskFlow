@@ -588,7 +588,14 @@ func handleStoreScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID i
 		return
 	}
 
-	session, _ := app.sessionManager.ValidateSession(sessionID)
+	session, err := app.sessionManager.ValidateSession(sessionID)
+	if err != nil || session == nil {
+		log.Printf("[TicketExchange/store] ValidateSession failed for just-created session: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "admin_session_error: session validation failed",
+		})
+		return
+	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"admin_session": session,
@@ -620,7 +627,14 @@ func handleCustomerScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeI
 		return
 	}
 
-	session, _ := app.sessionManager.ValidateSession(sessionID)
+	session, err := app.sessionManager.ValidateSession(sessionID)
+	if err != nil || session == nil {
+		log.Printf("[TicketExchange/customer] ValidateSession failed for just-created session: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "user_session_error: session validation failed",
+		})
+		return
+	}
 
 	resp := map[string]interface{}{
 		"session": session,
@@ -658,12 +672,19 @@ func handlePlainScope(w http.ResponseWriter, app *App, ti *TicketInfo) {
 	if err != nil {
 		log.Printf("[TicketExchange/plain] CreateUserSession error: %v", err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "message": "internal error",
+			"success": false, "message": "user_session_error: " + err.Error(),
 		})
 		return
 	}
 
-	session, _ := app.sessionManager.ValidateSession(sessionID)
+	session, err := app.sessionManager.ValidateSession(sessionID)
+	if err != nil || session == nil {
+		log.Printf("[TicketExchange/plain] ValidateSession failed for just-created session: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "user_session_error: session validation failed",
+		})
+		return
+	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"session": session,
