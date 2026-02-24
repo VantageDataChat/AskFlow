@@ -197,9 +197,14 @@ func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 
 		if err := app.shopService.UpdateWelcomeMessage(req.StorefrontID, req.WelcomeMessage); err != nil {
 			log.Printf("[StoreSupportUpdateWelcome] update error: %v", err)
-			WriteJSON(w, http.StatusOK, shop.UpdateWelcomeResponse{
+			errMsg := err.Error()
+			status := http.StatusInternalServerError
+			if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "未找到") {
+				status = http.StatusNotFound
+			}
+			WriteJSON(w, status, shop.UpdateWelcomeResponse{
 				Success: false,
-				Message: err.Error(),
+				Message: errMsg,
 			})
 			return
 		}

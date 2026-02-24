@@ -30,14 +30,29 @@
         }
     })();
 
-    // Shared product fetch — returns a promise, caches the result
+    // Shared product fetch — returns a promise, caches the result.
+    // mode: 'default' = exclude shop sub-products, 'shop:ID' = only that shop product, 'all' = unfiltered
     var _productFetchPromise = null;
-    function fetchProducts() {
+    var _productFetchMode = null;
+    function fetchProducts(mode) {
+        mode = mode || 'default';
+        // If cache exists for a different mode, invalidate it
+        if (cachedProducts && _productFetchMode !== mode) {
+            cachedProducts = null;
+            _productFetchPromise = null;
+        }
         if (cachedProducts) {
             return Promise.resolve(cachedProducts);
         }
         if (!_productFetchPromise) {
-            _productFetchPromise = fetch('/api/products')
+            var url = '/api/products';
+            if (mode.indexOf('shop:') === 0) {
+                url += '?only_id=' + encodeURIComponent(mode.substring(5));
+            } else if (mode === 'default') {
+                url += '?exclude_shop=1';
+            }
+            _productFetchMode = mode;
+            _productFetchPromise = fetch(url)
                 .then(function (res) { return res.json(); })
                 .then(function (data) {
                     cachedProducts = data.products || [];
@@ -45,6 +60,7 @@
                 })
                 .catch(function () {
                     _productFetchPromise = null;
+                    _productFetchMode = null;
                     return [];
                 });
         }
@@ -889,9 +905,11 @@
             if (userMenu) userMenu.classList.add('hidden');
         }
 
-        // Load products and resolve initial product in one flow (shared cache)
-        loadChatProducts();
-        resolveInitialProduct(function () {
+        // Resolve initial product FIRST (synchronous for customer/store context),
+        // then load products into selector. This ensures askflow_product_id is set
+        // before loadChatProducts reads it to select the correct option.
+        resolveInitialProduct(function (productFetchMode) {
+            loadChatProducts(productFetchMode);
             if (chatMessages.length === 0) {
                 loadWelcomeMessage();
             } else {
@@ -911,13 +929,14 @@
         });
     }
 
-    // Load products into the chat header product selector
-    function loadChatProducts() {
+    // Load products into the chat header product selector.
+    // productFetchMode: 'shop:ID' for market customers, 'default' otherwise.
+    function loadChatProducts(productFetchMode) {
         var selector = document.getElementById('chat-product-selector');
         var defaultSelect = document.getElementById('chat-default-product');
         if (!selector) return;
 
-        fetchProducts()
+        fetchProducts(productFetchMode || 'default')
             .then(function (products) {
                 if (products.length === 0) {
                     selector.classList.add('hidden');
@@ -971,6 +990,13 @@
 
                 selector.classList.remove('hidden');
 
+                // In shop-only mode (market customer), disable switching
+                if (productFetchMode && productFetchMode.indexOf('shop:') === 0) {
+                    selector.disabled = true;
+                } else {
+                    selector.disabled = false;
+                }
+
                 // Listen for product switch (bind only once)
                 if (!selector._changeListenerBound) {
                     selector._changeListenerBound = true;
@@ -1000,17 +1026,28 @@
         // 0. Customer store context takes highest priority (from scope=customer login)
         var customerStoreRaw = localStorage.getItem('askflow_customer_store');
         if (customerStoreRaw) {
+            var shopProductMode = 'default';
             try {
                 var customerStore = JSON.parse(customerStoreRaw);
                 if (customerStore.shop_module_product_id) {
                     localStorage.setItem('askflow_product_id', customerStore.shop_module_product_id);
+                    // Remember this is a market customer so refreshes keep showing only the shop product
+                    localStorage.setItem('askflow_shop_product_mode', 'shop:' + customerStore.shop_module_product_id);
+                    shopProductMode = 'shop:' + customerStore.shop_module_product_id;
                     if (customerStore.product) {
                         localStorage.setItem('askflow_product_name', customerStore.product);
                     }
                 }
             } catch (e) { /* ignore */ }
             localStorage.removeItem('askflow_customer_store');
-            if (callback) callback();
+            if (callback) callback(shopProductMode);
+            return;
+        }
+
+        // 0a. Returning market customer (page refresh) — restore shop product mode
+        var savedShopMode = localStorage.getItem('askflow_shop_product_mode');
+        if (savedShopMode) {
+            if (callback) callback(savedShopMode);
             return;
         }
 
@@ -4504,7 +4541,6 @@
 
             if (data.session && data.user) {
                 saveSession(data.session, { id: data.user.id, email: data.user.email, name: data.user.name, provider: data.user.provider });
-                fetchProducts();
 
                 // Handle customer scope — redirect to chat with store product selected
                 if (data.store && data.store.scope === 'customer') {
@@ -4513,6 +4549,8 @@
                     handleRoute();
                     return;
                 }
+
+                fetchProducts();
 
                 // Handle store_error — store not approved
                 if (data.store_error) {
@@ -4877,7 +4915,7 @@
                 el.placeholder = i18n.t(el.getAttribute('data-i18n-placeholder'));
             });
         }
-        adminFetch('/api/products')
+        adminFetch('/api/products?exclude_shop=1')
             .then(function (res) {
                 if (!res.ok) throw new Error('load failed');
                 return res.json();
@@ -5061,7 +5099,7 @@
         var container = document.getElementById('admin-new-products-checkboxes');
         if (!container) return;
 
-        adminFetch('/api/products')
+        adminFetch('/api/products?exclude_shop=1')
             .then(function (res) {
                 if (!res.ok) throw new Error('load failed');
                 return res.json();
@@ -5099,7 +5137,7 @@
     function loadShopsProductSelector() {
         var sel = document.getElementById('shops-product-select');
         var prevValue = sel ? sel.value : '';
-        adminFetch('/api/products')
+        adminFetch('/api/products?exclude_shop=1')
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (!sel) return;
@@ -5411,6 +5449,10 @@
         chatLoading = false;
         localStorage.removeItem('askflow_product_id');
         localStorage.removeItem('askflow_product_name');
+        localStorage.removeItem('askflow_shop_product_mode');
+        cachedProducts = null;
+        _productFetchPromise = null;
+        _productFetchMode = null;
         clearSession();
         navigate('/login');
     };
@@ -5471,8 +5513,10 @@
         // Check for ticket-login callback (SN login via desktop app)
         if (handleTicketLoginFromURL()) return;
 
-        // Pre-warm product cache early (used by login page and chat page)
-        fetchProducts();
+        // Pre-warm product cache early (used by login page and chat page).
+        // If this is a returning market customer, use their shop product mode.
+        var savedMode = localStorage.getItem('askflow_shop_product_mode');
+        fetchProducts(savedMode || 'default');
 
         // Fetch app-info in parallel (non-blocking, doesn't affect routing)
         fetch('/api/app-info')
@@ -5790,7 +5834,7 @@
 
     // Admin FAQ management
     function loadFAQAdminProductSelector() {
-        adminFetch('/api/products')
+        adminFetch('/api/products?exclude_shop=1')
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 var sel = document.getElementById('faq-admin-product-select');

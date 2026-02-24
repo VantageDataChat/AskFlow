@@ -644,7 +644,7 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		// Validate path doesn't contain shell metacharacters
-		if strings.ContainsAny(s, "|;&$`") {
+		if strings.ContainsAny(s, "|;&$`()<>\n\r") {
 			return errors.New("ffmpeg path contains invalid characters")
 		}
 		cm.config.Video.FFmpegPath = s
@@ -654,7 +654,7 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		// Validate path doesn't contain shell metacharacters
-		if strings.ContainsAny(s, "|;&$`") {
+		if strings.ContainsAny(s, "|;&$`()<>\n\r") {
 			return errors.New("rapidspeech path contains invalid characters")
 		}
 		// Allow clearing the path
@@ -688,7 +688,7 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected string")
 		}
 		// Validate path doesn't contain shell metacharacters
-		if strings.ContainsAny(s, "|;&$`") {
+		if strings.ContainsAny(s, "|;&$`()<>\n\r") {
 			return errors.New("rapidspeech model path contains invalid characters")
 		}
 		// Allow clearing the path

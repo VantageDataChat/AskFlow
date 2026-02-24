@@ -16,6 +16,21 @@ func HandleProducts(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			// ?only_id=xxx — return only the product with this ID (for market customer chat)
+			if onlyID := r.URL.Query().Get("only_id"); onlyID != "" {
+				if !IsValidHexID(onlyID) {
+					WriteError(w, http.StatusBadRequest, "invalid only_id")
+					return
+				}
+				p, err := app.GetProduct(onlyID)
+				if err != nil || p == nil {
+					WriteJSON(w, http.StatusOK, map[string]interface{}{"products": []product.Product{}})
+					return
+				}
+				WriteJSON(w, http.StatusOK, map[string]interface{}{"products": []product.Product{*p}})
+				return
+			}
+
 			products, err := app.ListProducts()
 			if err != nil {
 				log.Printf("[Products] list error: %v", err)
@@ -25,6 +40,25 @@ func HandleProducts(app *App) http.HandlerFunc {
 			if products == nil {
 				products = []product.Product{}
 			}
+
+			// ?exclude_shop=1 — hide shop sub-products from the public list
+			if r.URL.Query().Get("exclude_shop") == "1" && app.shopService != nil {
+				shopIDs, err := app.shopService.ListShopProductIDs()
+				if err == nil && len(shopIDs) > 0 {
+					exclude := make(map[string]bool, len(shopIDs))
+					for _, id := range shopIDs {
+						exclude[id] = true
+					}
+					filtered := make([]product.Product, 0, len(products))
+					for _, p := range products {
+						if !exclude[p.ID] {
+							filtered = append(filtered, p)
+						}
+					}
+					products = filtered
+				}
+			}
+
 			WriteJSON(w, http.StatusOK, map[string]interface{}{"products": products})
 
 		case http.MethodPost:

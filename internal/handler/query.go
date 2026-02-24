@@ -50,6 +50,13 @@ func HandleQuery(app *App) http.HandlerFunc {
 				req.ProductID = firstID
 			}
 		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
+		}
 		resp, err := app.queryEngine.Query(req)
 		if err != nil {
 			log.Printf("[Query] error: %v", err)

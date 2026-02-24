@@ -327,10 +327,12 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 
 		// Update storefront_id if it was 0 and now provided
 		if existing.StorefrontID == 0 && req.StorefrontID > 0 {
-			_, _ = s.writeDB.Exec(
+			if _, err := s.writeDB.Exec(
 				`UPDATE shops SET storefront_id = ?, updated_at = ? WHERE id = ?`,
 				req.StorefrontID, time.Now(), existing.ID,
-			)
+			); err != nil {
+				return fmt.Errorf("failed to link storefront_id: %w", err)
+			}
 			log.Printf("[ShopRegister] linked storefront_id=%d to shop %s", req.StorefrontID, existing.ID)
 		}
 
@@ -456,6 +458,28 @@ func (s *ShopService) SetStorefrontID(ownerID int64, storefrontID int64) error {
 	return err
 }
 
+// ListShopProductIDs returns all non-empty shop_module_product_id values from approved shops.
+// Used to filter shop sub-products out of the public product list.
+func (s *ShopService) ListShopProductIDs() ([]string, error) {
+	rows, err := s.readDB.Query(
+		`SELECT shop_module_product_id FROM shops WHERE shop_module_product_id != '' AND status = ?`,
+		StatusApproved,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // Delete removes a shop and its associated data within a transaction.
 // If retainKnowledge is true, only the shop record, activation requests, and child product
 // are deleted; documents and chunks are preserved.
@@ -503,18 +527,25 @@ func (s *ShopService) Delete(shopID string, retainKnowledge bool) error {
 
 	// 6. Delete the child product and its admin_user_products assignments
 	if moduleProductID != "" {
-		tx.Exec(`DELETE FROM admin_user_products WHERE product_id = ?`, moduleProductID)
+		if _, err := tx.Exec(`DELETE FROM admin_user_products WHERE product_id = ?`, moduleProductID); err != nil {
+			return fmt.Errorf("failed to delete admin_user_products: %w", err)
+		}
 		if _, err := tx.Exec(`DELETE FROM products WHERE id = ?`, moduleProductID); err != nil {
 			return fmt.Errorf("failed to delete shop module product: %w", err)
 		}
 	}
 
 	// 7. Clean up store owner sub-admin account (username = store_{shopID})
+	// Use tx.QueryRow (not readDB) to ensure consistency within the transaction.
 	storeUsername := "store_" + shopID
 	var subAdminID string
-	if err := s.readDB.QueryRow(`SELECT id FROM admin_users WHERE username = ?`, storeUsername).Scan(&subAdminID); err == nil {
-		tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, "admin_"+subAdminID)
-		tx.Exec(`DELETE FROM admin_users WHERE id = ?`, subAdminID)
+	if err := tx.QueryRow(`SELECT id FROM admin_users WHERE username = ?`, storeUsername).Scan(&subAdminID); err == nil {
+		if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = ?`, "admin_"+subAdminID); err != nil {
+			return fmt.Errorf("failed to delete sub-admin sessions: %w", err)
+		}
+		if _, err := tx.Exec(`DELETE FROM admin_users WHERE id = ?`, subAdminID); err != nil {
+			return fmt.Errorf("failed to delete sub-admin: %w", err)
+		}
 	}
 
 	// 8. Commit transaction

@@ -3,6 +3,7 @@ package auth
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -135,10 +136,12 @@ func (ll *LoginLimiter) RecordAttempt(username, ip string, success bool) {
 	if success {
 		successInt = 1
 	}
-	ll.writeDB.Exec(
+	if _, err := ll.writeDB.Exec(
 		`INSERT INTO login_attempts (username, ip, success, created_at) VALUES (?, ?, ?, ?)`,
 		username, ip, successInt, time.Now().UTC().Format(time.RFC3339),
-	)
+	); err != nil {
+		log.Printf("[LoginLimiter] failed to record login attempt: %v", err)
+	}
 }
 
 // CleanOld removes login attempt records older than 30 days.

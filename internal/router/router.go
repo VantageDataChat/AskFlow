@@ -45,6 +45,17 @@ func Register(app *handler.App) func() {
 		return secureAPI(apiRateLimit(h))
 	}
 
+	// ShopIsolation middleware for shop owner routes.
+	// Defined early so it can be reused across multiple route groups.
+	shopIsolation := middleware.ShopIsolation(app.SessionManager(), app.ReadDB(), app.ShopService())
+	secureShop := func(h http.HandlerFunc) http.HandlerFunc {
+		return secureAPI(shopIsolation(h))
+	}
+	// secureShopRL applies secureAPI + shopIsolation + auth rate limit
+	secureShopRL := func(h http.HandlerFunc) http.HandlerFunc {
+		return secureAPI(shopIsolation(rateLimit(h)))
+	}
+
 	// ── OAuth ──
 	http.HandleFunc("/api/oauth/url", secure(handler.HandleOAuthURL(app)))
 	http.HandleFunc("/api/oauth/callback", secureRL(handler.HandleOAuthCallback(app)))
@@ -75,24 +86,24 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/translate-product-name", secureAPIRL(handler.HandleTranslateProductName(app)))
 
 	// ── Query ──
-	http.HandleFunc("/api/query", secureRL(handler.HandleQuery(app)))
+	http.HandleFunc("/api/query", secureShopRL(handler.HandleQuery(app)))
 
 	// ── User preferences ──
 	http.HandleFunc("/api/user/preferences", secure(handler.HandleUserPreferences(app)))
 
 	// ── Documents ──
 	http.HandleFunc("/api/documents/public-download/", secure(handler.HandlePublicDocumentDownload(app)))
-	http.HandleFunc("/api/documents/upload", secure(handler.HandleDocumentUpload(app)))
-	http.HandleFunc("/api/documents/url/preview", secure(handler.HandleDocumentURLPreview(app)))
-	http.HandleFunc("/api/documents/url", secure(handler.HandleDocumentURL(app)))
-	http.HandleFunc("/api/documents", secure(handler.HandleDocuments(app)))
-	http.HandleFunc("/api/documents/", secure(handler.HandleDocumentByID(app)))
+	http.HandleFunc("/api/documents/upload", secureShop(handler.HandleDocumentUpload(app)))
+	http.HandleFunc("/api/documents/url/preview", secureShop(handler.HandleDocumentURLPreview(app)))
+	http.HandleFunc("/api/documents/url", secureShop(handler.HandleDocumentURL(app)))
+	http.HandleFunc("/api/documents", secureShop(handler.HandleDocuments(app)))
+	http.HandleFunc("/api/documents/", secureShop(handler.HandleDocumentByID(app)))
 
 	// ── Pending questions ──
-	http.HandleFunc("/api/pending/answer", secure(handler.HandlePendingAnswer(app)))
-	http.HandleFunc("/api/pending/create", secure(handler.HandlePendingCreate(app)))
-	http.HandleFunc("/api/pending/", secure(handler.HandlePendingByID(app)))
-	http.HandleFunc("/api/pending", secure(handler.HandlePending(app)))
+	http.HandleFunc("/api/pending/answer", secureShop(handler.HandlePendingAnswer(app)))
+	http.HandleFunc("/api/pending/create", secureShop(handler.HandlePendingCreate(app)))
+	http.HandleFunc("/api/pending/", secureShop(handler.HandlePendingByID(app)))
+	http.HandleFunc("/api/pending", secureShop(handler.HandlePending(app)))
 
 	// ── Config ──
 	http.HandleFunc("/api/config", secure(handler.HandleConfigWithRole(app)))
@@ -145,13 +156,13 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/products", secure(handler.HandleProducts(app)))
 
 	// ── FAQ ──
-	http.HandleFunc("/api/faq", secure(handler.HandleFAQ(app)))
-	http.HandleFunc("/api/admin/faq/reorder", secure(handler.HandleFAQAdminReorder(app)))
-	http.HandleFunc("/api/admin/faq/", secure(handler.HandleFAQAdminByID(app)))
-	http.HandleFunc("/api/admin/faq", secure(handler.HandleFAQAdminList(app)))
+	http.HandleFunc("/api/faq", secureShop(handler.HandleFAQ(app)))
+	http.HandleFunc("/api/admin/faq/reorder", secureShop(handler.HandleFAQAdminReorder(app)))
+	http.HandleFunc("/api/admin/faq/", secureShop(handler.HandleFAQAdminByID(app)))
+	http.HandleFunc("/api/admin/faq", secureShop(handler.HandleFAQAdminList(app)))
 
 	// ── Knowledge ──
-	http.HandleFunc("/api/knowledge", secure(handler.HandleKnowledgeEntry(app)))
+	http.HandleFunc("/api/knowledge", secureShop(handler.HandleKnowledgeEntry(app)))
 
 	// ── Image upload ──
 	http.HandleFunc("/api/images/upload", secure(handler.HandleImageUpload(app)))
@@ -176,12 +187,7 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/media/", secure(handler.HandleMediaStream(app)))
 
 	// ── Shop ──
-	// ShopIsolation middleware for shop owner routes (activate, info).
 	// Auth route does NOT use ShopIsolation since the user is not yet authenticated.
-	shopIsolation := middleware.ShopIsolation(app.SessionManager(), app.ReadDB(), app.ShopService())
-	secureShop := func(h http.HandlerFunc) http.HandlerFunc {
-		return secureAPI(shopIsolation(h))
-	}
 	http.HandleFunc("/api/shop/auth", secureRL(handler.HandleShopAuth(app)))
 	http.HandleFunc("/api/shop/activate", secureShop(handler.HandleShopActivate(app)))
 	http.HandleFunc("/api/shop/info", secureShop(handler.HandleShopInfo(app)))

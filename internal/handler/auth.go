@@ -641,7 +641,9 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 		// If scope=customer and store_id is provided, include customer view info
 		if req.Scope == "customer" && req.StoreID > 0 && app.shopService != nil {
 			foundShop, _ := app.shopService.GetByStorefrontID(req.StoreID)
-			if foundShop != nil && foundShop.Status == shop.StatusApproved {
+			log.Printf("[TicketExchange] scope=customer, store_id=%d, foundByStorefrontID=%v",
+				req.StoreID, foundShop != nil)
+			if foundShop != nil && foundShop.Status == shop.StatusApproved && foundShop.ShopModuleProductID != "" {
 				resp["store"] = map[string]interface{}{
 					"store_id":               req.StoreID,
 					"store_name":             foundShop.Name,
@@ -650,6 +652,10 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 					"product":                req.Product,
 					"shop_module_product_id": foundShop.ShopModuleProductID,
 				}
+			} else if foundShop != nil {
+				log.Printf("[TicketExchange] shop found but not ready: status=%s, product_id=%q",
+					foundShop.Status, foundShop.ShopModuleProductID)
+				resp["store_error"] = "该店铺未开通客户支持"
 			} else {
 				resp["store_error"] = "该店铺未开通客户支持"
 			}
