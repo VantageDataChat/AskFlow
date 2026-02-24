@@ -557,6 +557,8 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 
 			// First try to find by storefront_id
 			foundShop, _ = app.shopService.GetByStorefrontID(req.StoreID)
+			log.Printf("[TicketExchange] scope=store, store_id=%d, email=%s, foundByStorefrontID=%v",
+				req.StoreID, email, foundShop != nil)
 
 			// If not found by storefront_id, try by owner_id and link the storefront_id
 			if foundShop == nil {
@@ -564,10 +566,14 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 				err := app.readDB.QueryRow(
 					"SELECT id FROM sn_users WHERE email = ?", email,
 				).Scan(&ownerID)
-				if err == nil {
+				if err != nil {
+					log.Printf("[TicketExchange] sn_users lookup failed for email=%s: %v", email, err)
+				} else {
 					foundShop, _ = app.shopService.GetByOwnerID(ownerID)
+					log.Printf("[TicketExchange] fallback GetByOwnerID(%d): found=%v", ownerID, foundShop != nil)
 					if foundShop != nil {
 						_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
+						log.Printf("[TicketExchange] linked storefront_id=%d to owner_id=%d", req.StoreID, ownerID)
 					}
 				}
 			} else if foundShop.StorefrontID == 0 {
@@ -579,6 +585,10 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 				if err == nil {
 					_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
 				}
+			}
+
+			if foundShop == nil {
+				log.Printf("[TicketExchange] WARNING: no shop found for scope=store, store_id=%d, email=%s", req.StoreID, email)
 			}
 
 			if foundShop != nil {
