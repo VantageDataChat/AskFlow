@@ -163,6 +163,7 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 
 // HandleStoreSupportUpdateWelcome handles POST /api/store-support/update-welcome.
 // Marketplace calls this to sync the welcome message when a store's description changes.
+// Requires a valid SN token for authentication.
 func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -177,6 +178,30 @@ func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 				Message: "invalid request body",
 			})
 			return
+		}
+
+		// Authenticate: require a valid SN token (same as register endpoint)
+		if strings.TrimSpace(req.Token) == "" {
+			WriteJSON(w, http.StatusUnauthorized, shop.UpdateWelcomeResponse{
+				Success: false,
+				Message: "token is required",
+			})
+			return
+		}
+		snResp, _, err := app.HandleSNLogin(req.Token)
+		if err != nil || !snResp.Success {
+			log.Printf("[StoreSupportUpdateWelcome] token verification failed")
+			WriteJSON(w, http.StatusUnauthorized, shop.UpdateWelcomeResponse{
+				Success: false,
+				Message: "token 验证失败",
+			})
+			return
+		}
+		// Clean up the session created during token verification
+		if snResp.LoginTicket != "" {
+			if sessionID, err := app.ValidateLoginTicket(snResp.LoginTicket); err == nil {
+				_ = app.sessionManager.DeleteSession(sessionID)
+			}
 		}
 
 		if req.StorefrontID <= 0 {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"askflow/internal/loginlog"
 	"askflow/internal/middleware"
 )
 
@@ -41,10 +42,14 @@ func (e *ForbiddenError) Error() string {
 
 // GetBaseURL derives the public base URL from the request, respecting
 // X-Forwarded-Proto for reverse-proxy setups.
+// X-Forwarded-Host is validated to prevent host header injection.
 func GetBaseURL(r *http.Request) string {
 	host := r.Host
 	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
-		host = fwdHost
+		// Validate forwarded host: must not contain path separators or whitespace
+		if !strings.ContainsAny(fwdHost, "/ \t\r\n") {
+			host = fwdHost
+		}
 	}
 	scheme := "http"
 	if r.TLS != nil {
@@ -116,6 +121,7 @@ func GetAdminSession(app *App, r *http.Request) (string, string, error) {
 	}
 	session, err := app.sessionManager.ValidateSession(token)
 	if err != nil {
+		loginlog.Log(loginlog.EventSessionExpired, "unknown", middleware.GetClientIP(r), "admin_session")
 		return "", "", fmt.Errorf("会话无效")
 	}
 	if !app.IsAdminSession(session.UserID) {
@@ -237,18 +243,22 @@ func ValidatePassword(password string) string {
 	if len(password) > 72 {
 		return "密码不能超过72位"
 	}
-	hasLetter := false
+	hasLower := false
+	hasUpper := false
 	hasDigit := false
 	for _, c := range password {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
-			hasLetter = true
+		if c >= 'a' && c <= 'z' {
+			hasLower = true
+		}
+		if c >= 'A' && c <= 'Z' {
+			hasUpper = true
 		}
 		if c >= '0' && c <= '9' {
 			hasDigit = true
 		}
 	}
-	if !hasLetter || !hasDigit {
-		return "密码必须包含字母和数字"
+	if !hasLower || !hasUpper || !hasDigit {
+		return "密码必须包含大写字母、小写字母和数字"
 	}
 	return ""
 }

@@ -95,6 +95,16 @@ func (sm *SessionManager) CreateSession(userID string) (*Session, error) {
 // Returns the session if valid, or an error if not found or expired.
 // Uses an in-memory cache to avoid DB hits on every authenticated request.
 func (sm *SessionManager) ValidateSession(sessionID string) (*Session, error) {
+	// Validate session ID format: must be 64 hex chars (32 bytes encoded)
+	if len(sessionID) != 64 {
+		return nil, fmt.Errorf("session not found")
+	}
+	for _, c := range sessionID {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return nil, fmt.Errorf("session not found")
+		}
+	}
+
 	// Check cache first
 	if s, ok := sm.cacheGet(sessionID); ok {
 		// Re-validate expiry on cached session

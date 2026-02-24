@@ -8,6 +8,9 @@ import "net/http"
 func CORS() Middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			// Always set Vary: Origin to prevent cache poisoning
+			w.Header().Set("Vary", "Origin")
+
 			// Only allow same-origin requests — reflect the Host as allowed origin
 			origin := r.Header.Get("Origin")
 			if origin != "" {
@@ -20,7 +23,6 @@ func CORS() Middleware {
 					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Set("Access-Control-Max-Age", "3600")
-					w.Header().Set("Vary", "Origin")
 				}
 			}
 			if r.Method == http.MethodOptions {

@@ -117,16 +117,26 @@ func (rl *RateLimiter) cleanup() {
 
 // GetClientIP extracts the client IP from the request, respecting X-Forwarded-For
 // but only using the first (leftmost) IP to avoid spoofing.
+// Falls back to RemoteAddr if the forwarded IP is not a valid IP address.
 func GetClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// Use only the first IP (client IP set by the first proxy)
+		var candidate string
 		if idx := strings.IndexByte(xff, ','); idx != -1 {
-			return strings.TrimSpace(xff[:idx])
+			candidate = strings.TrimSpace(xff[:idx])
+		} else {
+			candidate = strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
+		// Validate it's a real IP to prevent rate limit bypass with arbitrary strings
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
 	}
 	if xri := r.Header.Get("X-Real-Ip"); xri != "" {
-		return strings.TrimSpace(xri)
+		candidate := strings.TrimSpace(xri)
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

@@ -77,6 +77,7 @@ type RegisterResponse struct {
 
 // UpdateWelcomeRequest is the input payload for POST /api/store-support/update-welcome.
 type UpdateWelcomeRequest struct {
+	Token          string `json:"token"`
 	StorefrontID   int64  `json:"storefront_id"`
 	WelcomeMessage string `json:"welcome_message"`
 }

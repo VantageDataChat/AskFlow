@@ -76,7 +76,7 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/auth/reset-password", secureRL(handler.HandleResetPassword(app)))
 	http.HandleFunc("/api/auth/sn-login", secureRL(handler.HandleSNLogin(app)))
 	http.HandleFunc("/api/auth/ticket-exchange", secureRL(handler.HandleTicketExchange(app)))
-	http.HandleFunc("/auth/ticket-login", handler.HandleTicketLogin(app))
+	http.HandleFunc("/auth/ticket-login", secure(handler.HandleTicketLogin(app)))
 	http.HandleFunc("/api/captcha", secure(handler.HandleCaptcha()))
 	http.HandleFunc("/api/captcha/image", secureRL(handler.HandleCaptchaImage()))
 
@@ -183,6 +183,12 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/logs/download", secure(handler.HandleLogsDownload(app)))
 	http.HandleFunc("/api/logs/clear", secure(handler.HandleLogsClear(app)))
 
+	// ── Login log management (admin only) ──
+	http.HandleFunc("/api/login-logs/recent", secure(handler.HandleLoginLogsRecent(app)))
+	http.HandleFunc("/api/login-logs/rotation", secure(handler.HandleLoginLogsRotation(app)))
+	http.HandleFunc("/api/login-logs/download", secure(handler.HandleLoginLogsDownload(app)))
+	http.HandleFunc("/api/login-logs/clear", secure(handler.HandleLoginLogsClear(app)))
+
 	// ── Public media streaming ──
 	http.HandleFunc("/api/media/", secure(handler.HandleMediaStream(app)))
 
@@ -194,7 +200,7 @@ func Register(app *handler.App) func() {
 
 	// ── Store Support (Marketplace integration) ──
 	http.HandleFunc("/api/store-support/register", secureRL(handler.HandleStoreSupportRegister(app)))
-	http.HandleFunc("/api/store-support/update-welcome", secure(handler.HandleStoreSupportUpdateWelcome(app)))
+	http.HandleFunc("/api/store-support/update-welcome", secureRL(handler.HandleStoreSupportUpdateWelcome(app)))
 
 	// ── Admin shop management ──
 	http.HandleFunc("/api/admin/shops/", secure(handler.HandleAdminShopDelete(app)))
