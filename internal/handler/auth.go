@@ -582,11 +582,12 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 
 			if foundShop != nil {
 				resp["store"] = map[string]interface{}{
-					"store_id":        req.StoreID,
-					"store_name":      foundShop.Name,
-					"welcome_message": foundShop.WelcomeMessage,
-					"scope":           "store",
-					"permissions":     []string{"documents", "pending", "knowledge", "faq"},
+					"store_id":               req.StoreID,
+					"store_name":             foundShop.Name,
+					"welcome_message":        foundShop.WelcomeMessage,
+					"scope":                  "store",
+					"permissions":             []string{"documents", "pending", "knowledge", "faq"},
+					"shop_module_product_id": foundShop.ShopModuleProductID,
 				}
 			}
 		}

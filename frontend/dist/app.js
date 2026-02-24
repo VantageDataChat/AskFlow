@@ -1007,8 +1007,6 @@
                     if (customerStore.product) {
                         localStorage.setItem('askflow_product_name', customerStore.product);
                     }
-                    var selector = document.getElementById('chat-product-selector');
-                    if (selector) selector.value = customerStore.shop_module_product_id;
                 }
             } catch (e) { /* ignore */ }
             localStorage.removeItem('askflow_customer_store');
@@ -1016,18 +1014,21 @@
             return;
         }
 
-        // 0b. Store owner context (from scope=store login)
+        // 0b. Store owner context (from scope=store login) — auto-select shop sub-product
         var storeContextRaw = localStorage.getItem('askflow_store_context');
         if (storeContextRaw) {
             try {
                 var storeCtx = JSON.parse(storeContextRaw);
-                // Store owner's shop_module_product_id is resolved via middleware,
-                // but we can use store_name to find the product
-                if (storeCtx.store_name) {
-                    urlProductName = storeCtx.store_name;
+                if (storeCtx.shop_module_product_id) {
+                    localStorage.setItem('askflow_product_id', storeCtx.shop_module_product_id);
+                    if (storeCtx.store_name) {
+                        localStorage.setItem('askflow_product_name', storeCtx.store_name);
+                    }
                 }
             } catch (e) { /* ignore */ }
             localStorage.removeItem('askflow_store_context');
+            if (callback) callback();
+            return;
         }
 
         // 1. URL parameter takes highest priority
