@@ -2535,7 +2535,9 @@ a.chat-source-download:hover {
     align-items: center;
 }
 
-#page-setup .login-container {
+#page-setup .login-container,
+#page-verify .login-container,
+#page-reset-password .login-container {
     align-items: center;
 }
 
