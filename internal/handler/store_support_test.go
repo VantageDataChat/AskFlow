@@ -120,6 +120,38 @@ func TestStoreSupportRegister_MissingWelcomeMessage(t *testing.T) {
 	}
 }
 
+// TestStoreSupportRegister_MissingParentProductID tests register with missing parent_product_id.
+func TestStoreSupportRegister_MissingParentProductID(t *testing.T) {
+	app := &App{}
+
+	body, _ := json.Marshal(shop.RegisterRequest{
+		Token:           "sometoken",
+		SoftwareName:    "vantagics",
+		StoreName:       "测试店铺",
+		WelcomeMessage:  "欢迎",
+		ParentProductID: "",
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/store-support/register", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	HandleStoreSupportRegister(app)(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", rec.Code)
+	}
+
+	var resp shop.RegisterResponse
+	json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.Success {
+		t.Error("expected success=false")
+	}
+	if resp.Message != "parent_product_id is required" {
+		t.Errorf("expected message 'parent_product_id is required', got %q", resp.Message)
+	}
+}
+
 // TestStoreSupportRegister_InvalidJSON tests register with invalid JSON body.
 func TestStoreSupportRegister_InvalidJSON(t *testing.T) {
 	app := &App{}
