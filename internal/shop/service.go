@@ -477,6 +477,43 @@ func (s *ShopService) SetStorefrontID(ownerID int64, storefrontID int64) error {
 	return err
 }
 
+// ResolveForLogin finds the shop for a login request.
+// Strategy: (1) try storefront_id, (2) fallback to owner_id via email → sn_users.
+// If found via owner_id and storefront_id was 0, links the storefront_id.
+// Returns nil, nil if no shop is found.
+func (s *ShopService) ResolveForLogin(storefrontID int64, ownerID int64) (*Shop, error) {
+	// Strategy 1: find by storefront_id
+	if storefrontID > 0 {
+		sh, err := s.GetByStorefrontID(storefrontID)
+		if err != nil {
+			return nil, fmt.Errorf("query by storefront_id: %w", err)
+		}
+		if sh != nil {
+			// Link storefront_id if not yet set
+			if sh.StorefrontID == 0 {
+				_ = s.SetStorefrontID(sh.OwnerID, storefrontID)
+			}
+			return sh, nil
+		}
+	}
+
+	// Strategy 2: find by owner_id
+	if ownerID > 0 {
+		sh, err := s.GetByOwnerID(ownerID)
+		if err != nil {
+			return nil, fmt.Errorf("query by owner_id: %w", err)
+		}
+		if sh != nil && storefrontID > 0 {
+			// Link the storefront_id for future lookups
+			_ = s.SetStorefrontID(ownerID, storefrontID)
+			log.Printf("[ShopResolve] linked storefront_id=%d to owner_id=%d", storefrontID, ownerID)
+		}
+		return sh, nil
+	}
+
+	return nil, nil
+}
+
 // ListShopProductIDs returns all non-empty shop_module_product_id values from approved shops.
 // Used to filter shop sub-products out of the public product list.
 func (s *ShopService) ListShopProductIDs() ([]string, error) {

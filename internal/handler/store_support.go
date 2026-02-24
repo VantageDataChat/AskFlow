@@ -10,6 +10,8 @@ import (
 
 // HandleStoreSupportRegister handles POST /api/store-support/register.
 // Marketplace calls this to register a store's support system in Service Portal.
+//
+// Flow: VerifySNToken → FindOrCreateSNUser → shopService.Register → FindOrCreateStoreOwnerAdmin
 func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -28,65 +30,41 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 
 		// Validate required fields
 		if strings.TrimSpace(req.Token) == "" {
-			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
-				Success: false,
-				Message: "token is required",
-			})
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{Success: false, Message: "token is required"})
 			return
 		}
 		if strings.TrimSpace(req.SoftwareName) == "" {
-			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
-				Success: false,
-				Message: "software_name is required",
-			})
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{Success: false, Message: "software_name is required"})
 			return
 		}
 		if strings.TrimSpace(req.StoreName) == "" {
-			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
-				Success: false,
-				Message: "store_name is required",
-			})
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{Success: false, Message: "store_name is required"})
 			return
 		}
 		if strings.TrimSpace(req.WelcomeMessage) == "" {
-			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
-				Success: false,
-				Message: "welcome_message is required",
-			})
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{Success: false, Message: "welcome_message is required"})
 			return
 		}
 		if strings.TrimSpace(req.ParentProductID) == "" {
-			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{
-				Success: false,
-				Message: "parent_product_id is required",
-			})
+			WriteJSON(w, http.StatusBadRequest, shop.RegisterResponse{Success: false, Message: "parent_product_id is required"})
 			return
 		}
 
-		// Verify token using the existing SN login flow (which calls License_Server)
-		snResp, status, err := app.HandleSNLogin(req.Token)
+		// Step 1: Verify token with license server (no side effects).
+		tokenInfo, err := app.VerifySNToken(req.Token)
 		if err != nil {
-			log.Printf("[StoreSupportRegister] SN login error: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{
-				Success: false,
-				Message: "internal error",
-			})
-			return
-		}
-		if !snResp.Success {
-			WriteJSON(w, status, shop.RegisterResponse{
+			log.Printf("[StoreSupportRegister] VerifySNToken failed: %v", err)
+			WriteJSON(w, http.StatusUnauthorized, shop.RegisterResponse{
 				Success: false,
 				Message: "token 验证失败",
 			})
 			return
 		}
 
-		// Find the sn_user by looking up the login ticket we just created
-		// The HandleSNLogin creates a ticket; we need the owner_id (sn_users.id).
-		// We can get it by validating the ticket, which gives us the user.
-		sessionID, err := app.ValidateLoginTicket(snResp.LoginTicket)
+		// Step 2: Find or create the SN user to get owner_id.
+		ownerID, err := app.FindOrCreateSNUser(tokenInfo.Email, tokenInfo.SN)
 		if err != nil {
-			log.Printf("[StoreSupportRegister] ticket validation error: %v", err)
+			log.Printf("[StoreSupportRegister] FindOrCreateSNUser error: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{
 				Success: false,
 				Message: "internal error",
@@ -94,48 +72,7 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 			return
 		}
 
-		// Get the user from the session to find the sn_user
-		session, err := app.sessionManager.ValidateSession(sessionID)
-		if err != nil {
-			log.Printf("[StoreSupportRegister] session validation error: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{
-				Success: false,
-				Message: "internal error",
-			})
-			return
-		}
-
-		// Look up the email from users table, then find sn_users.id
-		var email string
-		err = app.readDB.QueryRow(
-			"SELECT email FROM users WHERE id = ? AND provider = 'sn'", session.UserID,
-		).Scan(&email)
-		if err != nil {
-			log.Printf("[StoreSupportRegister] query user email: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{
-				Success: false,
-				Message: "internal error",
-			})
-			return
-		}
-
-		var ownerID int64
-		err = app.readDB.QueryRow(
-			"SELECT id FROM sn_users WHERE email = ?", email,
-		).Scan(&ownerID)
-		if err != nil {
-			log.Printf("[StoreSupportRegister] query sn_user: %v", err)
-			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{
-				Success: false,
-				Message: "internal error",
-			})
-			return
-		}
-
-		// Clean up the session we just created (it was only for token verification)
-		_ = app.sessionManager.DeleteSession(sessionID)
-
-		// Register the shop
+		// Step 3: Register the shop.
 		log.Printf("[StoreSupportRegister] registering shop for owner_id=%d, store=%q, parent_product_id=%q",
 			ownerID, req.StoreName, req.ParentProductID)
 		if err := app.shopService.Register(ownerID, req); err != nil {
@@ -147,7 +84,7 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 			return
 		}
 
-		// Create sub-admin account for the store owner right after registration
+		// Step 4: Create sub-admin account for the store owner.
 		if registeredShop, err := app.shopService.GetByOwnerID(ownerID); err == nil && registeredShop != nil {
 			if _, saErr := app.FindOrCreateStoreOwnerAdmin(registeredShop.ID, registeredShop.Name, registeredShop.ShopModuleProductID); saErr != nil {
 				log.Printf("[StoreSupportRegister] sub-admin creation failed for shop %s: %v", registeredShop.ID, saErr)
@@ -163,7 +100,7 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 
 // HandleStoreSupportUpdateWelcome handles POST /api/store-support/update-welcome.
 // Marketplace calls this to sync the welcome message when a store's description changes.
-// Requires a valid SN token for authentication.
+// Uses VerifySNToken directly — no ticket/session side effects.
 func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -180,7 +117,7 @@ func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 			return
 		}
 
-		// Authenticate: require a valid SN token (same as register endpoint)
+		// Authenticate with license server (no side effects).
 		if strings.TrimSpace(req.Token) == "" {
 			WriteJSON(w, http.StatusUnauthorized, shop.UpdateWelcomeResponse{
 				Success: false,
@@ -188,20 +125,13 @@ func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 			})
 			return
 		}
-		snResp, _, err := app.HandleSNLogin(req.Token)
-		if err != nil || !snResp.Success {
-			log.Printf("[StoreSupportUpdateWelcome] token verification failed")
+		if _, err := app.VerifySNToken(req.Token); err != nil {
+			log.Printf("[StoreSupportUpdateWelcome] VerifySNToken failed: %v", err)
 			WriteJSON(w, http.StatusUnauthorized, shop.UpdateWelcomeResponse{
 				Success: false,
 				Message: "token 验证失败",
 			})
 			return
-		}
-		// Clean up the session created during token verification
-		if snResp.LoginTicket != "" {
-			if sessionID, err := app.ValidateLoginTicket(snResp.LoginTicket); err == nil {
-				_ = app.sessionManager.DeleteSession(sessionID)
-			}
 		}
 
 		if req.StorefrontID <= 0 {
@@ -211,7 +141,6 @@ func HandleStoreSupportUpdateWelcome(app *App) http.HandlerFunc {
 			})
 			return
 		}
-
 		if strings.TrimSpace(req.WelcomeMessage) == "" {
 			WriteJSON(w, http.StatusBadRequest, shop.UpdateWelcomeResponse{
 				Success: false,

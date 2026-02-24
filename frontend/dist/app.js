@@ -4612,9 +4612,14 @@
         return true;
     }
 
-    // Handle ticket-login callback (SN login via desktop app)
+    // Handle ticket-login callback (SN login via Marketplace).
     // When /auth/ticket-login redirects to /?ticket=xxx, this function
     // exchanges the ticket for a session via the backend API.
+    //
+    // Three scope paths:
+    //   scope=store    → admin_session + store → /admin-panel
+    //   scope=customer → session + store       → /chat (with store product)
+    //   (no scope)     → session               → /chat (plain SN login)
     function handleTicketLoginFromURL() {
         var params = new URLSearchParams(window.location.search);
         var ticket = params.get('ticket');
@@ -4648,7 +4653,7 @@
             return res.json();
         })
         .then(function (data) {
-            // Handle store login failure — shop not found
+            // Store login failure — shop not found or not approved
             if (data.store_error && !data.session && !data.admin_session) {
                 showToast(data.store_error, 'error');
                 window.history.replaceState({}, '', '/login');
@@ -4656,8 +4661,8 @@
                 return;
             }
 
-            // Handle store scope — store owner management session (no regular session)
-            if (data.store && data.store.scope === 'store' && data.admin_session) {
+            // Path 1: scope=store → store owner admin panel
+            if (data.admin_session && data.store && data.store.scope === 'store') {
                 saveAdminSession(data.admin_session, data.admin_user);
                 localStorage.setItem('askflow_store_context', JSON.stringify(data.store));
                 window.history.replaceState({}, '', '/admin-panel');
@@ -4665,30 +4670,32 @@
                 return;
             }
 
+            // Path 2 & 3: scope=customer or plain → user session
             if (data.session && data.user) {
-                saveSession(data.session, { id: data.user.id, email: data.user.email, name: data.user.name, provider: data.user.provider });
+                saveSession(data.session, {
+                    id: data.user.id,
+                    email: data.user.email,
+                    name: data.user.name,
+                    provider: data.user.provider
+                });
 
-                // Handle customer scope — redirect to chat with store product selected
+                // Path 2: scope=customer → chat with store product
                 if (data.store && data.store.scope === 'customer') {
                     localStorage.setItem('askflow_customer_store', JSON.stringify(data.store));
-                    window.history.replaceState({}, '', '/chat');
-                    handleRoute();
-                    return;
+                }
+
+                if (data.store_error) {
+                    showToast(data.store_error, 'error');
                 }
 
                 fetchProducts();
-
-                // Handle store_error — store not approved
-                if (data.store_error) {
-                    showToast(data.store_error, 'error');
-                    window.history.replaceState({}, '', '/chat');
-                    handleRoute();
-                    return;
-                }
-
                 window.history.replaceState({}, '', '/chat');
                 handleRoute();
+                return;
             }
+
+            // Unexpected response — no session at all
+            throw new Error('no session returned from ticket exchange');
         })
         .catch(function (err) {
             var detail = encodeURIComponent(err.message || 'unknown');

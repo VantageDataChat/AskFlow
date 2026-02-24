@@ -495,7 +495,12 @@ func HandleTicketLogin(app *App) http.HandlerFunc {
 }
 
 // HandleTicketExchange handles POST /api/auth/ticket-exchange — validates a one-time
-// login ticket and returns {session, user} JSON for the frontend to store in localStorage.
+// login ticket and returns the appropriate session based on scope.
+//
+// Scope behavior:
+//   - scope=store  → validate ticket, resolve shop, create admin session
+//   - scope=customer → validate ticket, create user session, attach store info
+//   - (no scope)   → validate ticket, create user session (plain SN login)
 func HandleTicketExchange(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -503,175 +508,167 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+
 		var req struct {
 			Ticket  string `json:"ticket"`
 			Scope   string `json:"scope"`
 			StoreID int64  `json:"store_id"`
 			Product string `json:"product"`
 		}
-		if err := ReadJSONBody(r, &req); err != nil {
+		if err := ReadJSONBody(r, &req); err != nil || req.Ticket == "" {
 			WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
 				"success": false, "message": "ticket is required",
 			})
 			return
 		}
 
-		log.Printf("[TicketExchange] request: scope=%q store_id=%d product=%q ticket_len=%d",
-			req.Scope, req.StoreID, req.Product, len(req.Ticket))
-		if req.Ticket == "" {
-			WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
-				"success": false, "message": "ticket is required",
-			})
-			return
-		}
+		log.Printf("[TicketExchange] scope=%q store_id=%d ticket_len=%d", req.Scope, req.StoreID, len(req.Ticket))
 
-		sessionID, err := app.ValidateLoginTicket(req.Ticket)
+		// Step 1: Validate the one-time ticket (marks it as used atomically).
+		ticketInfo, err := app.ValidateLoginTicket(req.Ticket)
 		if err != nil {
-			log.Printf("[TicketExchange] ValidateLoginTicket failed: ticket=%q scope=%q store_id=%d err=%v",
-				req.Ticket, req.Scope, req.StoreID, err)
-			status := http.StatusUnauthorized
-			WriteJSON(w, status, map[string]interface{}{
+			log.Printf("[TicketExchange] ValidateLoginTicket failed: err=%v scope=%q store_id=%d", err, req.Scope, req.StoreID)
+			WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
 				"success": false, "message": err.Error(),
 			})
 			return
 		}
 
-		// Fetch session details
-		session, err := app.sessionManager.ValidateSession(sessionID)
-		if err != nil {
-			WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-				"success": false, "message": "internal error",
-			})
-			return
+		log.Printf("[TicketExchange] ticket valid: sn_user_id=%d email=%s", ticketInfo.SNUserID, ticketInfo.Email)
+
+		// Step 2: Route by scope.
+		switch req.Scope {
+		case "store":
+			handleStoreScope(w, app, ticketInfo, req.StoreID)
+		case "customer":
+			handleCustomerScope(w, app, ticketInfo, req.StoreID, req.Product)
+		default:
+			handlePlainScope(w, app, ticketInfo)
 		}
+	}
+}
 
-		// Fetch user info
-		var email, name, provider string
-		_ = app.readDB.QueryRow(
-			"SELECT COALESCE(email,''), COALESCE(name,''), COALESCE(provider,'') FROM users WHERE id = ?",
-			session.UserID,
-		).Scan(&email, &name, &provider)
+// handleStoreScope handles ticket-exchange for scope=store (shop owner → admin panel).
+func handleStoreScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID int64) {
+	if storeID <= 0 || app.shopService == nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"success": false, "message": "store_id is required for scope=store",
+		})
+		return
+	}
 
-		resp := map[string]interface{}{
-			"session": session,
-			"user": map[string]string{
-				"id":       session.UserID,
-				"email":    email,
-				"name":     name,
-				"provider": provider,
-			},
-		}
+	// Resolve the shop (by storefront_id, fallback to owner_id).
+	foundShop, err := app.shopService.ResolveForLogin(storeID, ti.SNUserID)
+	if err != nil {
+		log.Printf("[TicketExchange/store] ResolveForLogin error: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "internal error",
+		})
+		return
+	}
+	if foundShop == nil {
+		log.Printf("[TicketExchange/store] no shop found: store_id=%d email=%s sn_user_id=%d", storeID, ti.Email, ti.SNUserID)
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"success":     false,
+			"store_error": "未找到店铺记录，请先在市场申请开通客户支持",
+		})
+		return
+	}
 
-		// If scope=store and store_id is provided, create store management admin session
-		if req.Scope == "store" && req.StoreID > 0 && app.shopService != nil {
-			var foundShop *shop.Shop
+	// Create admin session for the store owner.
+	sessionID, _, err := app.CreateStoreAdminSession(foundShop)
+	if err != nil {
+		log.Printf("[TicketExchange/store] CreateStoreAdminSession error: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "internal error",
+		})
+		return
+	}
 
-			// First try to find by storefront_id
-			foundShop, _ = app.shopService.GetByStorefrontID(req.StoreID)
-			log.Printf("[TicketExchange] scope=store, store_id=%d, email=%s, foundByStorefrontID=%v",
-				req.StoreID, email, foundShop != nil)
+	session, _ := app.sessionManager.ValidateSession(sessionID)
 
-			// If not found by storefront_id, try by owner_id and link the storefront_id
-			if foundShop == nil {
-				var ownerID int64
-				err := app.readDB.QueryRow(
-					"SELECT id FROM sn_users WHERE email = ?", email,
-				).Scan(&ownerID)
-				if err != nil {
-					log.Printf("[TicketExchange] sn_users lookup failed for email=%s: %v", email, err)
-				} else {
-					foundShop, _ = app.shopService.GetByOwnerID(ownerID)
-					log.Printf("[TicketExchange] fallback GetByOwnerID(%d): found=%v", ownerID, foundShop != nil)
-					if foundShop != nil {
-						_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
-						log.Printf("[TicketExchange] linked storefront_id=%d to owner_id=%d", req.StoreID, ownerID)
-					}
-				}
-			} else if foundShop.StorefrontID == 0 {
-				// Shop found but storefront_id not yet set — link it
-				var ownerID int64
-				err := app.readDB.QueryRow(
-					"SELECT id FROM sn_users WHERE email = ?", email,
-				).Scan(&ownerID)
-				if err == nil {
-					_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
-				}
-			}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"admin_session": session,
+		"admin_user": map[string]string{
+			"username": foundShop.Name,
+			"provider": "admin",
+		},
+		"store": map[string]interface{}{
+			"store_id":               storeID,
+			"store_name":             foundShop.Name,
+			"welcome_message":        foundShop.WelcomeMessage,
+			"scope":                  "store",
+			"permissions":            []string{"documents", "pending", "knowledge", "faq"},
+			"shop_module_product_id": foundShop.ShopModuleProductID,
+			"parent_product_id":      foundShop.ParentProductID,
+		},
+	})
+}
 
-			if foundShop == nil {
-				log.Printf("[TicketExchange] WARNING: no shop found for scope=store, store_id=%d, email=%s", req.StoreID, email)
-				// Clean up the session — store login failed, don't leave a dangling user session
-				_ = app.sessionManager.DeleteSession(sessionID)
-				WriteJSON(w, http.StatusOK, map[string]interface{}{
-					"success":     false,
-					"store_error": "未找到店铺记录，请先在市场申请开通客户支持",
-				})
-				return
-			}
+// handleCustomerScope handles ticket-exchange for scope=customer (end-user → chat).
+func handleCustomerScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID int64, product string) {
+	// Create a regular user session.
+	sessionID, err := app.CreateUserSession(ti.Email, ti.DisplayName)
+	if err != nil {
+		log.Printf("[TicketExchange/customer] CreateUserSession error: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "internal error",
+		})
+		return
+	}
 
-			// Find or create a sub-admin account for the store owner
-			subAdminID, err := app.FindOrCreateStoreOwnerAdmin(
-				foundShop.ID, foundShop.Name, foundShop.ShopModuleProductID,
-			)
-			if err != nil {
-				log.Printf("[TicketExchange] store owner admin error: %v", err)
-				WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-					"success": false, "message": "internal error",
-				})
-				return
-			}
+	session, _ := app.sessionManager.ValidateSession(sessionID)
 
-			// Delete the regular user session and create an admin session
-			_ = app.sessionManager.DeleteSession(sessionID)
-			adminSessionUserID := "admin_" + subAdminID
-			adminSession, err := app.sessionManager.CreateSession(adminSessionUserID)
-			if err != nil {
-				WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-					"success": false, "message": "internal error",
-				})
-				return
-			}
+	resp := map[string]interface{}{
+		"session": session,
+		"user": map[string]string{
+			"id":       session.UserID,
+			"email":    ti.Email,
+			"name":     ti.DisplayName,
+			"provider": "sn",
+		},
+	}
 
-			resp["admin_session"] = adminSession
-			delete(resp, "session") // Remove stale regular session
-			resp["admin_user"] = map[string]string{
-				"username": foundShop.Name,
-				"provider": "admin",
-			}
+	// Attach store info if available.
+	if storeID > 0 && app.shopService != nil {
+		foundShop, _ := app.shopService.GetByStorefrontID(storeID)
+		if foundShop != nil && foundShop.Status == shop.StatusApproved && foundShop.ShopModuleProductID != "" {
 			resp["store"] = map[string]interface{}{
-				"store_id":               req.StoreID,
+				"store_id":               storeID,
 				"store_name":             foundShop.Name,
 				"welcome_message":        foundShop.WelcomeMessage,
-				"scope":                  "store",
-				"permissions":            []string{"documents", "pending", "knowledge", "faq"},
+				"scope":                  "customer",
+				"product":                product,
 				"shop_module_product_id": foundShop.ShopModuleProductID,
-				"parent_product_id":      foundShop.ParentProductID,
 			}
+		} else {
+			resp["store_error"] = "该店铺未开通客户支持"
 		}
-
-		// If scope=customer and store_id is provided, include customer view info
-		if req.Scope == "customer" && req.StoreID > 0 && app.shopService != nil {
-			foundShop, _ := app.shopService.GetByStorefrontID(req.StoreID)
-			log.Printf("[TicketExchange] scope=customer, store_id=%d, foundByStorefrontID=%v",
-				req.StoreID, foundShop != nil)
-			if foundShop != nil && foundShop.Status == shop.StatusApproved && foundShop.ShopModuleProductID != "" {
-				resp["store"] = map[string]interface{}{
-					"store_id":               req.StoreID,
-					"store_name":             foundShop.Name,
-					"welcome_message":        foundShop.WelcomeMessage,
-					"scope":                  "customer",
-					"product":                req.Product,
-					"shop_module_product_id": foundShop.ShopModuleProductID,
-				}
-			} else if foundShop != nil {
-				log.Printf("[TicketExchange] shop found but not ready: status=%s, product_id=%q",
-					foundShop.Status, foundShop.ShopModuleProductID)
-				resp["store_error"] = "该店铺未开通客户支持"
-			} else {
-				resp["store_error"] = "该店铺未开通客户支持"
-			}
-		}
-
-		WriteJSON(w, http.StatusOK, resp)
 	}
+
+	WriteJSON(w, http.StatusOK, resp)
+}
+
+// handlePlainScope handles ticket-exchange with no scope (plain SN login → chat).
+func handlePlainScope(w http.ResponseWriter, app *App, ti *TicketInfo) {
+	sessionID, err := app.CreateUserSession(ti.Email, ti.DisplayName)
+	if err != nil {
+		log.Printf("[TicketExchange/plain] CreateUserSession error: %v", err)
+		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+			"success": false, "message": "internal error",
+		})
+		return
+	}
+
+	session, _ := app.sessionManager.ValidateSession(sessionID)
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"session": session,
+		"user": map[string]string{
+			"id":       session.UserID,
+			"email":    ti.Email,
+			"name":     ti.DisplayName,
+			"provider": "sn",
+		},
+	})
 }

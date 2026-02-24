@@ -1829,35 +1829,39 @@ type SNLoginResponse struct {
 	Message     string `json:"message,omitempty"`
 }
 
-// HandleSNLogin verifies a token with the license server, finds or creates the SN user,
-// and returns a one-time login ticket.
-func (a *App) HandleSNLogin(token string) (*SNLoginResponse, int, error) {
+// SNTokenInfo holds the verified identity returned by the license server.
+type SNTokenInfo struct {
+	Email string
+	SN    string
+}
+
+// VerifySNToken verifies a Marketplace token with the license server.
+// This is a pure verification step with no side effects (no DB writes, no sessions).
+func (a *App) VerifySNToken(token string) (*SNTokenInfo, error) {
 	if token == "" {
-		return &SNLoginResponse{Success: false, Message: "token is required"}, 400, nil
+		return nil, fmt.Errorf("token is required")
 	}
 
 	cfg := a.configManager.Get()
 	if cfg == nil {
-		return &SNLoginResponse{Success: false, Message: "config not loaded"}, 500, nil
+		return nil, fmt.Errorf("config not loaded")
 	}
 	authServer := cfg.AuthServer
 	if authServer == "" {
-		return &SNLoginResponse{Success: false, Message: "auth server not configured"}, 500, nil
+		return nil, fmt.Errorf("auth server not configured")
 	}
 
-	// Verify token with license server
 	verifyURL := fmt.Sprintf("https://%s/api/marketplace-verify", authServer)
-	// Use json.Marshal to safely encode the token, preventing JSON injection
 	tokenJSON, err := json.Marshal(map[string]string{"token": token})
 	if err != nil {
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+		return nil, fmt.Errorf("internal error")
 	}
 
 	client := &httpClient{Timeout: 10 * time.Second}
 	resp, err := client.Post(verifyURL, "application/json", strings.NewReader(string(tokenJSON)))
 	if err != nil {
-		log.Printf("[SNLogin] failed to contact license server: %v", err)
-		return &SNLoginResponse{Success: false, Message: "failed to contact license server"}, 502, nil
+		log.Printf("[VerifySNToken] failed to contact license server: %v", err)
+		return nil, fmt.Errorf("failed to contact license server")
 	}
 	defer resp.Body.Close()
 
@@ -1870,10 +1874,10 @@ func (a *App) HandleSNLogin(token string) (*SNLoginResponse, int, error) {
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+		return nil, fmt.Errorf("internal error")
 	}
 	if err := json.Unmarshal(body, &verifyResp); err != nil {
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+		return nil, fmt.Errorf("internal error")
 	}
 
 	if !verifyResp.Success {
@@ -1881,21 +1885,21 @@ func (a *App) HandleSNLogin(token string) (*SNLoginResponse, int, error) {
 		if verifyResp.Message != "" {
 			msg += ": " + verifyResp.Message
 		}
-		return &SNLoginResponse{Success: false, Message: msg}, 401, nil
+		return nil, fmt.Errorf("%s", msg)
 	}
 
-	email := verifyResp.Email
-	sn := verifyResp.SN
-	if email == "" {
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+	if verifyResp.Email == "" {
+		return nil, fmt.Errorf("license server returned empty email")
 	}
 
-	// Find or create SN user (use writeDB for the read to avoid TOCTOU race
-	// where two concurrent logins for the same email both see ErrNoRows)
+	return &SNTokenInfo{Email: verifyResp.Email, SN: verifyResp.SN}, nil
+}
+
+// FindOrCreateSNUser finds or creates an SN user record and returns the sn_users.id.
+func (a *App) FindOrCreateSNUser(email, sn string) (int64, error) {
 	var userID int64
-	err = a.db.QueryRow("SELECT id FROM sn_users WHERE email = ?", email).Scan(&userID)
+	err := a.db.QueryRow("SELECT id FROM sn_users WHERE email = ?", email).Scan(&userID)
 	if err == sql.ErrNoRows {
-		// Create new user
 		displayName := email
 		if idx := strings.Index(email, "@"); idx > 0 {
 			displayName = email[:idx]
@@ -1905,67 +1909,102 @@ func (a *App) HandleSNLogin(token string) (*SNLoginResponse, int, error) {
 			email, displayName, sn,
 		)
 		if err != nil {
-			log.Printf("[SNLogin] create user error: %v", err)
-			return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+			return 0, fmt.Errorf("create sn_user: %w", err)
 		}
 		userID, _ = result.LastInsertId()
 	} else if err != nil {
-		log.Printf("[SNLogin] query user error: %v", err)
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+		return 0, fmt.Errorf("query sn_user: %w", err)
 	} else {
-		// Update last login and SN
 		if _, err := a.db.Exec("UPDATE sn_users SET last_login_at = CURRENT_TIMESTAMP, sn = ? WHERE id = ?", sn, userID); err != nil {
-			log.Printf("[SNLogin] failed to update last login: %v", err)
+			log.Printf("[FindOrCreateSNUser] failed to update last login: %v", err)
 		}
 	}
+	return userID, nil
+}
 
-	// Generate one-time login ticket (UUID-like)
+// CreateLoginTicket generates a one-time login ticket for the given sn_users.id.
+// The ticket expires in 5 minutes.
+func (a *App) CreateLoginTicket(snUserID int64) (string, error) {
 	ticketBytes := make([]byte, 16)
 	if _, err := rand.Read(ticketBytes); err != nil {
-		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+		return "", fmt.Errorf("generate ticket: %w", err)
 	}
 	ticket := fmt.Sprintf("%x-%x-%x-%x-%x",
 		ticketBytes[0:4], ticketBytes[4:6], ticketBytes[6:8], ticketBytes[8:10], ticketBytes[10:16])
 
 	expiresAt := time.Now().UTC().Add(5 * time.Minute)
-	_, err = a.db.Exec(
+	_, err := a.db.Exec(
 		"INSERT INTO login_tickets (ticket, user_id, used, created_at, expires_at) VALUES (?, ?, 0, CURRENT_TIMESTAMP, ?)",
-		ticket, userID, expiresAt.Format(time.RFC3339),
+		ticket, snUserID, expiresAt.Format(time.RFC3339),
 	)
 	if err != nil {
-		log.Printf("[SNLogin] create ticket error: %v", err)
+		return "", fmt.Errorf("insert ticket: %w", err)
+	}
+	return ticket, nil
+}
+
+// HandleSNLogin verifies a token with the license server, finds or creates the SN user,
+// and returns a one-time login ticket.
+// Composes VerifySNToken → FindOrCreateSNUser → CreateLoginTicket.
+func (a *App) HandleSNLogin(token string) (*SNLoginResponse, int, error) {
+	info, err := a.VerifySNToken(token)
+	if err != nil {
+		msg := err.Error()
+		status := 401
+		if strings.Contains(msg, "contact license server") {
+			status = 502
+		} else if strings.Contains(msg, "not configured") || strings.Contains(msg, "not loaded") || strings.Contains(msg, "internal") {
+			status = 500
+		}
+		return &SNLoginResponse{Success: false, Message: msg}, status, nil
+	}
+
+	snUserID, err := a.FindOrCreateSNUser(info.Email, info.SN)
+	if err != nil {
+		log.Printf("[SNLogin] FindOrCreateSNUser error: %v", err)
+		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
+	}
+
+	ticket, err := a.CreateLoginTicket(snUserID)
+	if err != nil {
+		log.Printf("[SNLogin] CreateLoginTicket error: %v", err)
 		return &SNLoginResponse{Success: false, Message: "internal error"}, 500, nil
 	}
 
 	return &SNLoginResponse{Success: true, LoginTicket: ticket}, 200, nil
 }
 
-// ValidateLoginTicket validates a one-time login ticket and returns the associated user info.
-// On success, it marks the ticket as used and creates a session.
-func (a *App) ValidateLoginTicket(ticket string) (sessionID string, err error) {
+// TicketInfo holds the validated ticket data before session creation.
+type TicketInfo struct {
+	SNUserID    int64
+	Email       string
+	DisplayName string
+}
+
+// ValidateLoginTicket validates a one-time login ticket and returns the ticket info.
+// On success, it atomically marks the ticket as used.
+// The caller decides what kind of session to create based on scope.
+func (a *App) ValidateLoginTicket(ticket string) (*TicketInfo, error) {
 	if ticket == "" {
-		return "", fmt.Errorf("invalid_ticket")
+		return nil, fmt.Errorf("invalid_ticket")
 	}
 
 	var userID int64
 	var used int
 	var expiresAtStr string
 
-	// Read ticket from writeDB (not readDB) to prevent TOCTOU race:
-	// two concurrent requests could both read used=0 from the read pool
-	// before either marks it used. Using writeDB serializes access.
-	err = a.db.QueryRow(
+	err := a.db.QueryRow(
 		"SELECT user_id, used, expires_at FROM login_tickets WHERE ticket = ?", ticket,
 	).Scan(&userID, &used, &expiresAtStr)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("invalid_ticket")
+		return nil, fmt.Errorf("invalid_ticket")
 	}
 	if err != nil {
-		return "", fmt.Errorf("internal_error")
+		return nil, fmt.Errorf("internal_error")
 	}
 
 	if used != 0 {
-		return "", fmt.Errorf("ticket_already_used")
+		return nil, fmt.Errorf("ticket_already_used")
 	}
 
 	expiresAt, err := time.Parse(time.RFC3339, expiresAtStr)
@@ -1973,32 +2012,36 @@ func (a *App) ValidateLoginTicket(ticket string) (sessionID string, err error) {
 		expiresAt, _ = time.Parse("2006-01-02T15:04:05Z", expiresAtStr)
 	}
 	if time.Now().UTC().After(expiresAt) {
-		return "", fmt.Errorf("ticket_expired")
+		return nil, fmt.Errorf("ticket_expired")
 	}
 
-	// Atomically mark ticket as used — WHERE used = 0 ensures only one request succeeds
+	// Atomically mark ticket as used
 	result, err := a.db.Exec("UPDATE login_tickets SET used = 1 WHERE ticket = ? AND used = 0", ticket)
 	if err != nil {
 		log.Printf("[ValidateLoginTicket] failed to mark ticket as used: %v", err)
-		return "", fmt.Errorf("internal_error")
+		return nil, fmt.Errorf("internal_error")
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		// Another concurrent request already consumed this ticket
-		return "", fmt.Errorf("ticket_already_used")
+		return nil, fmt.Errorf("ticket_already_used")
 	}
 
-	// Find the SN user
+	// Look up the SN user
 	var email, displayName string
 	err = a.readDB.QueryRow("SELECT email, display_name FROM sn_users WHERE id = ?", userID).Scan(&email, &displayName)
 	if err != nil {
-		return "", fmt.Errorf("internal_error")
+		log.Printf("[ValidateLoginTicket] sn_user lookup failed for id=%d: %v", userID, err)
+		return nil, fmt.Errorf("internal_error")
 	}
 
-	// Find or create a regular user entry for session management
-	// Use writeDB for the read to avoid TOCTOU race with concurrent ticket validations
+	return &TicketInfo{SNUserID: userID, Email: email, DisplayName: displayName}, nil
+}
+
+// CreateUserSession creates (or reuses) a regular user entry for the SN user
+// and returns a new session ID.
+func (a *App) CreateUserSession(email, displayName string) (string, error) {
 	var regularUserID string
-	err = a.db.QueryRow("SELECT id FROM users WHERE email = ? AND provider = 'sn'", email).Scan(&regularUserID)
+	err := a.db.QueryRow("SELECT id FROM users WHERE email = ? AND provider = 'sn'", email).Scan(&regularUserID)
 	if err == sql.ErrNoRows {
 		regularUserID = hex.EncodeToString(func() []byte { b := make([]byte, 16); rand.Read(b); return b }())
 		_, err = a.db.Exec(
@@ -2006,20 +2049,35 @@ func (a *App) ValidateLoginTicket(ticket string) (sessionID string, err error) {
 			regularUserID, email, displayName, email,
 		)
 		if err != nil {
-			log.Printf("[TicketLogin] create user error: %v", err)
-			return "", fmt.Errorf("internal_error")
+			return "", fmt.Errorf("create user: %w", err)
 		}
 	} else if err != nil {
-		return "", fmt.Errorf("internal_error")
+		return "", fmt.Errorf("query user: %w", err)
 	} else {
 		a.db.Exec("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", regularUserID)
 	}
 
-	// Create session
 	session, err := a.sessionManager.CreateSession(regularUserID)
 	if err != nil {
-		return "", fmt.Errorf("internal_error")
+		return "", fmt.Errorf("create session: %w", err)
+	}
+	return session.ID, nil
+}
+
+// CreateStoreAdminSession creates an admin session for a store owner.
+// Returns the session ID and the admin user ID.
+func (a *App) CreateStoreAdminSession(foundShop *shop.Shop) (sessionID, subAdminID string, err error) {
+	subAdminID, err = a.FindOrCreateStoreOwnerAdmin(
+		foundShop.ID, foundShop.Name, foundShop.ShopModuleProductID,
+	)
+	if err != nil {
+		return "", "", fmt.Errorf("create store admin: %w", err)
 	}
 
-	return session.ID, nil
+	adminSessionUserID := "admin_" + subAdminID
+	session, err := a.sessionManager.CreateSession(adminSessionUserID)
+	if err != nil {
+		return "", "", fmt.Errorf("create admin session: %w", err)
+	}
+	return session.ID, subAdminID, nil
 }

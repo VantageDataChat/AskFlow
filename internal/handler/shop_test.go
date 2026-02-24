@@ -177,10 +177,22 @@ func TestProperty_ValidTokenProducesValidSession(t *testing.T) {
 			rt.Fatal("expected non-empty login_ticket")
 		}
 
-		// Validate the login ticket produces a valid session.
-		sessionID, err := app.ValidateLoginTicket(resp.LoginTicket)
+		// Validate the login ticket produces valid ticket info.
+		ticketInfo, err := app.ValidateLoginTicket(resp.LoginTicket)
 		if err != nil {
 			rt.Fatalf("ValidateLoginTicket failed: %v", err)
+		}
+		if ticketInfo == nil {
+			rt.Fatal("expected non-nil ticket info")
+		}
+		if ticketInfo.Email == "" {
+			rt.Fatal("expected non-empty email in ticket info")
+		}
+
+		// Create a user session from the ticket info.
+		sessionID, err := app.CreateUserSession(ticketInfo.Email, ticketInfo.DisplayName)
+		if err != nil {
+			rt.Fatalf("CreateUserSession failed: %v", err)
 		}
 		if sessionID == "" {
 			rt.Fatal("expected non-empty session ID")
