@@ -50,7 +50,8 @@ Content-Type: application/json
   "software_name": "vantagics",
   "store_name": "我的数据分析小铺",
   "welcome_message": "欢迎来到我的数据分析小铺的客户支持",
-  "parent_product_id": "产品ID"
+  "parent_product_id": "产品ID",
+  "storefront_id": 123
 }
 ```
 
@@ -60,6 +61,7 @@ Content-Type: application/json
 | software_name | string | 是 | 固定为 `"vantagics"` |
 | store_name | string | 是 | 店铺名称，取自 Marketplace 的 `author_storefronts.store_name` |
 | parent_product_id | string | 是 | 父产品 ID，店铺将挂载在此产品下 |
+| storefront_id | int64 | 否 | 店铺 ID，对应 Marketplace 的 `author_storefronts.id`。传入后可加速后续登录时的店铺匹配 |
 | welcome_message | string | 是 | 欢迎语。若店铺介绍非空则为店铺介绍原文；若为空则为默认值 `"欢迎来到 {store_name} 的客户支持"` |
 
 **成功响应（200）：**

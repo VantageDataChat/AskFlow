@@ -66,6 +66,7 @@ type RegisterRequest struct {
 	StoreName       string `json:"store_name"`
 	WelcomeMessage  string `json:"welcome_message"`
 	ParentProductID string `json:"parent_product_id"`
+	StorefrontID    int64  `json:"storefront_id"`
 }
 
 // RegisterResponse is the response for POST /api/store-support/register.

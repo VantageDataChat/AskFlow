@@ -589,6 +589,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 
 			if foundShop == nil {
 				log.Printf("[TicketExchange] WARNING: no shop found for scope=store, store_id=%d, email=%s", req.StoreID, email)
+				resp["store_error"] = "未找到店铺记录，请先在市场申请开通客户支持"
 			}
 
 			if foundShop != nil {
