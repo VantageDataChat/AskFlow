@@ -161,7 +161,14 @@ func HandleShopActivate(app *App) http.HandlerFunc {
 			return
 		}
 
-		// 6. Return the ActivateResponse as JSON.
+		// 6. Create sub-admin account for the store owner
+		if resp.Shop != nil && resp.ShopModuleProductID != "" {
+			if _, saErr := app.FindOrCreateStoreOwnerAdmin(resp.Shop.ID, resp.Shop.Name, resp.ShopModuleProductID); saErr != nil {
+				log.Printf("[ShopActivate] sub-admin creation failed: %v", saErr)
+			}
+		}
+
+		// 7. Return the ActivateResponse as JSON.
 		WriteJSON(w, http.StatusOK, resp)
 	}
 }
@@ -267,6 +274,9 @@ func HandleAdminShops(app *App) http.HandlerFunc {
 			if shops[i].Status == "pending" {
 				if fixErr := app.shopService.FixPendingShop(&shops[i]); fixErr != nil {
 					log.Printf("[AdminShops] auto-fix pending shop %s failed: %v", shops[i].ID, fixErr)
+				} else {
+					// Also ensure sub-admin account exists for the fixed shop
+					_, _ = app.FindOrCreateStoreOwnerAdmin(shops[i].ID, shops[i].Name, shops[i].ShopModuleProductID)
 				}
 			}
 		}

@@ -147,6 +147,13 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 			return
 		}
 
+		// Create sub-admin account for the store owner right after registration
+		if registeredShop, err := app.shopService.GetByOwnerID(ownerID); err == nil && registeredShop != nil {
+			if _, saErr := app.FindOrCreateStoreOwnerAdmin(registeredShop.ID, registeredShop.Name, registeredShop.ShopModuleProductID); saErr != nil {
+				log.Printf("[StoreSupportRegister] sub-admin creation failed for shop %s: %v", registeredShop.ID, saErr)
+			}
+		}
+
 		WriteJSON(w, http.StatusOK, shop.RegisterResponse{
 			Success: true,
 			Message: "注册成功",
