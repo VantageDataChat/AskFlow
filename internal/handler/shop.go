@@ -262,7 +262,37 @@ func HandleAdminShops(app *App) http.HandlerFunc {
 			shops = []shop.Shop{}
 		}
 
-		WriteJSON(w, http.StatusOK, map[string]interface{}{"shops": shops})
+		// Auto-fix any pending shops (legacy data from before no-approval logic)
+		for i := range shops {
+			if shops[i].Status == "pending" {
+				if fixErr := app.shopService.FixPendingShop(&shops[i]); fixErr != nil {
+					log.Printf("[AdminShops] auto-fix pending shop %s failed: %v", shops[i].ID, fixErr)
+				}
+			}
+		}
+
+		// Build product ID → name map for display
+		productNameMap := make(map[string]string)
+		if products, pErr := app.ListProducts(); pErr == nil {
+			for _, p := range products {
+				productNameMap[p.ID] = p.Name
+			}
+		}
+
+		// Build response with parent_product_name
+		type shopView struct {
+			shop.Shop
+			ParentProductName string `json:"parent_product_name"`
+		}
+		result := make([]shopView, len(shops))
+		for i, s := range shops {
+			result[i] = shopView{
+				Shop:              s,
+				ParentProductName: productNameMap[s.ParentProductID],
+			}
+		}
+
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"shops": result})
 	}
 }
 

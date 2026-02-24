@@ -5162,7 +5162,7 @@
                 '<td>' + escapeHtml(s.name) + '</td>' +
                 '<td>' + statusLabel + '</td>' +
                 '<td>' + escapeHtml(String(s.owner_id || '-')) + '</td>' +
-                '<td><code style="font-size:11px">' + escapeHtml(s.parent_product_id || '-') + '</code></td>' +
+                '<td><code style="font-size:11px">' + escapeHtml(s.parent_product_name || s.parent_product_id || '-') + '</code></td>' +
                 '<td>' + escapeHtml(createdAt) + '</td>' +
                 '<td>' +
                     '<button class="btn-danger btn-sm" onclick="deleteShop(\'' + escapeHtml(s.id) + '\', \'' + escapeHtml(s.name) + '\')">' + i18n.t('admin_shops_delete_btn') + '</button>' +
@@ -5190,6 +5190,7 @@
 
     // --- Admin User Management ---
 
+    window.loadAdminUsers = loadAdminUsers;
     function loadAdminUsers() {
         var filter = (document.getElementById('admin-users-filter') || {}).value || '';
         var url = '/api/admin/users';
