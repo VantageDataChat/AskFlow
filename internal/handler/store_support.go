@@ -136,6 +136,8 @@ func HandleStoreSupportRegister(app *App) http.HandlerFunc {
 		_ = app.sessionManager.DeleteSession(sessionID)
 
 		// Register the shop
+		log.Printf("[StoreSupportRegister] registering shop for owner_id=%d, store=%q, parent_product_id=%q",
+			ownerID, req.StoreName, req.ParentProductID)
 		if err := app.shopService.Register(ownerID, req); err != nil {
 			log.Printf("[StoreSupportRegister] register error: %v", err)
 			WriteJSON(w, http.StatusInternalServerError, shop.RegisterResponse{

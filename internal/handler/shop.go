@@ -246,9 +246,15 @@ func HandleAdminShops(app *App) http.HandlerFunc {
 			return
 		}
 
-		shops, err := app.shopService.ListByProductID(productID)
-		if err != nil {
-			log.Printf("[AdminShops] list shops error: %v", err)
+		var shops []shop.Shop
+		var err2 error
+		if productID == "all" {
+			shops, err2 = app.shopService.ListAll()
+		} else {
+			shops, err2 = app.shopService.ListByProductID(productID)
+		}
+		if err2 != nil {
+			log.Printf("[AdminShops] list shops error: %v", err2)
 			WriteError(w, http.StatusInternalServerError, "获取店铺列表失败")
 			return
 		}

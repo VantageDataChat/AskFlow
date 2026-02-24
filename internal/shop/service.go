@@ -255,6 +255,33 @@ func (s *ShopService) ListByProductID(productID string) ([]Shop, error) {
 	return shops, nil
 }
 
+// ListAll returns all shops regardless of parent_product_id.
+// Returns an empty slice (not nil) if no shops are found.
+func (s *ShopService) ListAll() ([]Shop, error) {
+	rows, err := s.readDB.Query(
+		`SELECT id, name, owner_id, storefront_id, software_name, description, welcome_message, status, parent_product_id, shop_module_product_id, created_at, updated_at
+		 FROM shops ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query all shops: %w", err)
+	}
+	defer rows.Close()
+
+	shops := make([]Shop, 0)
+	for rows.Next() {
+		var shop Shop
+		if err := rows.Scan(&shop.ID, &shop.Name, &shop.OwnerID, &shop.StorefrontID, &shop.SoftwareName, &shop.Description,
+			&shop.WelcomeMessage, &shop.Status, &shop.ParentProductID, &shop.ShopModuleProductID, &shop.CreatedAt, &shop.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan shop row: %w", err)
+		}
+		shops = append(shops, shop)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating shop rows: %w", err)
+	}
+	return shops, nil
+}
+
 // Register creates a new shop support record from a Marketplace registration request.
 // The token is verified externally (by the handler); this method receives the verified owner_id.
 func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
@@ -273,6 +300,8 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 		return fmt.Errorf("failed to check existing shop: %w", err)
 	}
 	if existing != nil {
+		log.Printf("[ShopRegister] owner %d already has shop %q (id=%s, parent_product_id=%s), skipping creation",
+			ownerID, existing.Name, existing.ID, existing.ParentProductID)
 		// Update welcome_message if changed
 		if req.WelcomeMessage != "" && req.WelcomeMessage != existing.WelcomeMessage {
 			_, err = s.writeDB.Exec(
@@ -307,6 +336,9 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 	if err != nil {
 		return fmt.Errorf("failed to create shop record: %w", err)
 	}
+
+	log.Printf("[ShopRegister] created shop %q (id=%s) for owner %d, parent_product_id=%q",
+		storeName, shopID, ownerID, parentProductID)
 
 	return nil
 }

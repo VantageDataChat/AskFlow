@@ -5055,6 +5055,10 @@
                 if (!sel) return;
                 var products = data.products || [];
                 sel.innerHTML = '';
+                var allOpt = document.createElement('option');
+                allOpt.value = 'all';
+                allOpt.textContent = i18n.t('admin_shops_all_products');
+                sel.appendChild(allOpt);
                 for (var i = 0; i < products.length; i++) {
                     var opt = document.createElement('option');
                     opt.value = products[i].id;
@@ -5064,7 +5068,7 @@
                 if (prevValue && sel.querySelector('option[value="' + prevValue + '"]')) {
                     sel.value = prevValue;
                 }
-                if (products.length > 0) loadAdminShops();
+                loadAdminShops();
             })
             .catch(function () {
                 if (sel) sel.innerHTML = '';
@@ -5096,7 +5100,7 @@
         var tbody = document.getElementById('admin-shops-tbody');
         if (!tbody) return;
         if (!shops || shops.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="admin-table-empty">' + i18n.t('admin_shops_empty') + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="admin-table-empty">' + i18n.t('admin_shops_empty') + '</td></tr>';
             return;
         }
         var html = '';
@@ -5108,6 +5112,7 @@
                 '<td>' + escapeHtml(s.name) + '</td>' +
                 '<td>' + statusLabel + '</td>' +
                 '<td>' + escapeHtml(String(s.owner_id || '-')) + '</td>' +
+                '<td><code style="font-size:11px">' + escapeHtml(s.parent_product_id || '-') + '</code></td>' +
                 '<td>' + escapeHtml(createdAt) + '</td>' +
                 '<td>' +
                     '<button class="btn-danger btn-sm" onclick="deleteShop(\'' + escapeHtml(s.id) + '\', \'' + escapeHtml(s.name) + '\')">' + i18n.t('admin_shops_delete_btn') + '</button>' +
