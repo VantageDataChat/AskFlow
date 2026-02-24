@@ -42,7 +42,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 %SSHPASS% -p %PASS% scp -o StrictHostKeyChecking=accept-new -q start.sh %USER%@%SERVER%:%REMOTE_DIR%/start.sh
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\r$//' %REMOTE_DIR%/start.sh"
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\r$//' %REMOTE_DIR%/start.sh && sed -i 's|__REMOTE_DIR__|%REMOTE_DIR%|g' %REMOTE_DIR%/start.sh"
 echo        Upload OK
 echo.
 

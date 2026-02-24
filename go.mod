@@ -1,6 +1,6 @@
 module askflow
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/VantageDataChat/GoExcel v0.0.0-20260210221956-22a34d8dea7f
@@ -15,6 +15,7 @@ require (
 	golang.org/x/image v0.36.0
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/sys v0.41.0
+	pgregory.net/rapid v1.2.0
 )
 
 require (
@@ -23,7 +24,6 @@ require (
 	github.com/richardlehane/msoleps v1.0.3 // indirect
 	go.mozilla.org/pkcs7 v0.9.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
-	pgregory.net/rapid v1.2.0 // indirect
 )
 
 replace github.com/nicexipi/sqlite-vec => ./sqlite-vec

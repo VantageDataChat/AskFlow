@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /root/vantageselfservice
+cd __REMOTE_DIR__
 
 # --- Migration from helpdesk to askflow ---
 

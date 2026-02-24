@@ -6,7 +6,7 @@ set USER=root
 if "%DEPLOY_PASS%"=="" set /p DEPLOY_PASS=Enter password:
 
 set PASS=%DEPLOY_PASS%
-set REMOTE_DIR=/root/vantageselfservice
+set REMOTE_DIR=/data/soft/askflow
 set BINARY_NAME=askflow
 set SSHPASS=C:\Users\ma139\sshpass\sshpass
 
@@ -42,13 +42,13 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 %SSHPASS% -p %PASS% scp -o StrictHostKeyChecking=accept-new -q start.sh %USER%@%SERVER%:%REMOTE_DIR%/start.sh
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\r$//' %REMOTE_DIR%/start.sh"
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\r$//' %REMOTE_DIR%/start.sh && sed -i 's|__REMOTE_DIR__|%REMOTE_DIR%|g' %REMOTE_DIR%/start.sh"
 echo        Upload OK
 echo.
 
 REM --- Step 4: Remote extract, build, and restart ---
 echo [3/4] Building on remote server...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "cd %REMOTE_DIR% && tar -xzf deploy.tar.gz && rm -f deploy.tar.gz && export GOPROXY=https://goproxy.cn,direct && go get -u github.com/VantageDataChat/GoPPT && go mod tidy && go build -o %BINARY_NAME% . 2>&1"
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "cd %REMOTE_DIR% && tar -xzf deploy.tar.gz && rm -f deploy.tar.gz && export GOPROXY=https://goproxy.cn,direct && go get -u github.com/VantageDataChat/GoPPT && go mod tidy && go clean -cache && go build -o %BINARY_NAME% . 2>&1"
 if %errorlevel% neq 0 (
     echo [ERROR] Remote build failed!
     exit /b 1
@@ -76,12 +76,8 @@ echo [4/4] Restarting service...
 %SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "chmod +x %REMOTE_DIR%/start.sh && bash %REMOTE_DIR%/start.sh"
 echo.
 
-echo [5/6] Configuring ffmpeg in config.json...
+echo [5/5] Configuring ffmpeg in config.json...
 %SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\"ffmpeg_path\": \"[^\"]*\"/\"ffmpeg_path\": \"\/usr\/bin\/ffmpeg\"/' %REMOTE_DIR%/data/config.json 2>/dev/null && echo '  Config updated'"
-echo.
-
-echo [6/6] Removing nginx cache headers...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i '/# 禁用缓存/,/expires -1;/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; sed -i '/add_header Cache-Control.*no-store/d; /add_header Pragma.*no-cache/d; /add_header Expires.*0/d; /proxy_no_cache/d; /proxy_cache_bypass/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; nginx -t && systemctl reload nginx && echo '  Nginx cache disabled'"
 echo.
 
 REM --- Cleanup ---
