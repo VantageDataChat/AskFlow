@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"askflow/internal/middleware"
 	"askflow/internal/pending"
 )
 
@@ -32,6 +33,12 @@ func HandlePending(app *App) http.HandlerFunc {
 		productID := r.URL.Query().Get("product_id")
 		if !IsValidOptionalID(productID) {
 			WriteError(w, http.StatusBadRequest, "invalid product_id")
+			return
+		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		productID, err = resolveProductID(r, productID)
+		if err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		questions, err := app.ListPendingQuestions(status, productID)
@@ -64,6 +71,18 @@ func HandlePendingAnswer(app *App) http.HandlerFunc {
 		if err := ReadJSONBody(r, &req); err != nil {
 			WriteError(w, http.StatusBadRequest, "invalid request body")
 			return
+		}
+		// Shop owner isolation: verify the question belongs to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			pqProductID, pErr := app.GetPendingQuestionProductID(req.QuestionID)
+			if pErr != nil {
+				WriteError(w, http.StatusNotFound, "问题未找到")
+				return
+			}
+			if _, err := resolveProductID(r, pqProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		if err := app.AnswerQuestion(req); err != nil {
 			log.Printf("[Pending] answer error: %v", err)
@@ -110,6 +129,13 @@ func HandlePendingCreate(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusBadRequest, "image data too large")
 			return
 		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
+		}
 		pq, err := app.CreatePendingQuestion(req.Question, authenticatedUserID, req.ImageData, req.ProductID)
 		if err != nil {
 			log.Printf("[Pending] create error: %v", err)
@@ -142,6 +168,18 @@ func HandlePendingByID(app *App) http.HandlerFunc {
 		if err != nil {
 			WriteAdminSessionError(w, err)
 			return
+		}
+		// Shop owner isolation: verify the question belongs to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			pqProductID, pErr := app.GetPendingQuestionProductID(id)
+			if pErr != nil {
+				WriteError(w, http.StatusNotFound, "问题未找到")
+				return
+			}
+			if _, err := resolveProductID(r, pqProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		if err := app.DeletePendingQuestion(id); err != nil {
 			log.Printf("[Pending] delete error for %s: %v", id, err)

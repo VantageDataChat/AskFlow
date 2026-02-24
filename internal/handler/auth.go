@@ -7,6 +7,7 @@ import (
 
 	"askflow/internal/captcha"
 	"askflow/internal/middleware"
+	"askflow/internal/shop"
 )
 
 // --- OAuth handlers ---
@@ -453,9 +454,27 @@ func HandleTicketLogin(app *App) http.HandlerFunc {
 				return
 			}
 		}
-		// Pass ticket to frontend — the SPA will call /api/auth/ticket-exchange to
-		// validate it and store the session in localStorage (same pattern as OAuth).
-		http.Redirect(w, r, "/?ticket="+ticket, http.StatusFound)
+
+		// Build redirect URL with ticket
+		redirectURL := "/?ticket=" + ticket
+
+		// Support scope and store_id parameters for store management sessions
+		scope := r.URL.Query().Get("scope")
+		storeID := r.URL.Query().Get("store_id")
+		if scope == "store" && storeID != "" {
+			// Validate store_id contains only digits
+			for _, c := range storeID {
+				if c < '0' || c > '9' {
+					http.Redirect(w, r, "/login?error=invalid_store_id", http.StatusFound)
+					return
+				}
+			}
+			redirectURL += "&scope=store&store_id=" + storeID
+		}
+
+		// Pass ticket (and optional scope/store_id) to frontend — the SPA will
+		// call /api/auth/ticket-exchange to validate it and store the session.
+		http.Redirect(w, r, redirectURL, http.StatusFound)
 	}
 }
 
@@ -469,7 +488,9 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Ticket string `json:"ticket"`
+			Ticket  string `json:"ticket"`
+			Scope   string `json:"scope"`
+			StoreID int64  `json:"store_id"`
 		}
 		if err := ReadJSONBody(r, &req); err != nil {
 			WriteJSON(w, http.StatusBadRequest, map[string]interface{}{
@@ -509,7 +530,7 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 			session.UserID,
 		).Scan(&email, &name, &provider)
 
-		WriteJSON(w, http.StatusOK, map[string]interface{}{
+		resp := map[string]interface{}{
 			"session": session,
 			"user": map[string]string{
 				"id":       session.UserID,
@@ -517,6 +538,49 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 				"name":     name,
 				"provider": provider,
 			},
-		})
+		}
+
+		// If scope=store and store_id is provided, include store management info
+		if req.Scope == "store" && req.StoreID > 0 && app.shopService != nil {
+			var foundShop *shop.Shop
+
+			// First try to find by storefront_id
+			foundShop, _ = app.shopService.GetByStorefrontID(req.StoreID)
+
+			// If not found by storefront_id, try by owner_id and link the storefront_id
+			if foundShop == nil {
+				var ownerID int64
+				err := app.readDB.QueryRow(
+					"SELECT id FROM sn_users WHERE email = ?", email,
+				).Scan(&ownerID)
+				if err == nil {
+					foundShop, _ = app.shopService.GetByOwnerID(ownerID)
+					if foundShop != nil {
+						_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
+					}
+				}
+			} else if foundShop.StorefrontID == 0 {
+				// Shop found but storefront_id not yet set — link it
+				var ownerID int64
+				err := app.readDB.QueryRow(
+					"SELECT id FROM sn_users WHERE email = ?", email,
+				).Scan(&ownerID)
+				if err == nil {
+					_ = app.shopService.SetStorefrontID(ownerID, req.StoreID)
+				}
+			}
+
+			if foundShop != nil {
+				resp["store"] = map[string]interface{}{
+					"store_id":        req.StoreID,
+					"store_name":      foundShop.Name,
+					"welcome_message": foundShop.WelcomeMessage,
+					"scope":           "store",
+					"permissions":     []string{"documents", "pending", "knowledge", "faq"},
+				}
+			}
+		}
+
+		WriteJSON(w, http.StatusOK, resp)
 	}
 }

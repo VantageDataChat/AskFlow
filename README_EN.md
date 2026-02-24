@@ -58,66 +58,104 @@ Single Go binary deployment, SQLite storage, ready out of the box.
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  Frontend SPA                       │
-│             (frontend/dist)                         │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP API
-┌──────────────────────▼──────────────────────────────┐
-│                  Go HTTP Server                     │
-│ ┌─────────┐ ┌──────────┐ ┌────────┐ ┌───────────┐ │
-│ │ Auth   │ │ Document │ │ Query  │ │ Config   │ │
-│ │(OAuth  │ │ Manager  │ │ Engine │ │ Manager  │ │
-│ │Session)│ │         │ │(RAG)  │ │          │ │
-│ └─────────┘ └────┬─────┘ └───┬────┘ └───────────┘ │
-│ ┌─────────┐     │          │     ┌───────────┐  │
-│ │ Product │     │          │     │ Pending   │ │
-│ │ Service │     │          │     │ Manager   │ │
-│ └─────────┘     │          │     └───────────┘  │
-│ ┌─────────┐ ┌────▼─────┐ ┌──▼─────┐ ┌───────────┐ │
-│ │ Parser  │ │ Chunker  │ │Embedding│ │  LLM     │ │
-│ │PDF/Word│ │(512/128) │ │ Service │ │ Service  │ │
-│ │Excel/PPT│ │         │ │(txt+img)│ │(vision)  │ │
-│ └─────────┘ └──────────┘ └────┬────┘ └───────────┘ │
-│ ┌─────────┐                  │                     │
-│ │ Video   │                  │                     │
-│ │ Parser  │                  │                     │
-│ │(ffmpeg+ │                  │                     │
-│ │RapidSpch)│                 │                     │
-│ └─────────┘                  │                     │
-│             ┌─────────────────▼──────────────────┐  │
-│             │    SQLite + Vec Extension           │  │
-│             │  (WAL mode + memory cache +        │  │
-│             │   HNSW vector index)                │  │
-│             └────────────────────────────────────┘  │
-│                         │                           │
-│          ┌─────────────▼─────────────┐             │
-│          │    Vector Processing       │             │
-│          │ (Semantic Deduplication +  │             │
-│          │    3-Tier Retrieval Opt)   │             │
-│          └───────────────────────────┘             │
-└─────────────────────────────────────────────────────┘
-                       │
-          ┌────────────▼────────────┐
-          │ OpenAI-compatible API   │
-          │ (LLM + Embedding)       │
-          └─────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                     Frontend SPA (frontend/dist)                     │
+│       Vanilla JS · Photo Gallery · Media Modal · Streaming · i18n    │
+└────────────────────────────────┬─────────────────────────────────────┘
+                                 │ HTTP API (60+ endpoints)
+┌────────────────────────────────▼─────────────────────────────────────┐
+│                     Go HTTP Server (single binary)                    │
+│                                                                      │
+│  ┌─── Gateway Layer ───────────────────────────────────────────────┐ │
+│  │ CORS · Rate Limit · Request ID · Security Headers · Session    │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌─── Business Services ───────────────────────────────────────────┐ │
+│  │                                                                  │ │
+│  │  ┌──────────┐  ┌──────────────┐  ┌──────────┐  ┌────────────┐  │ │
+│  │  │   Auth   │  │   Document   │  │  Query   │  │  Product   │  │ │
+│  │  │ OAuth2.0 │  │   Manager    │  │  Engine  │  │  Service   │  │ │
+│  │  │ Session  │  │ Upload·Parse │  │  (RAG)   │  │ Isolation  │  │ │
+│  │  │ bcrypt   │  │ Chunk·Embed  │  │          │  │ Public Lib │  │ │
+│  │  │ Throttle │  │ SHA-256 Dedup│  │          │  │            │  │ │
+│  │  └──────────┘  └──────┬───────┘  └────┬─────┘  └────────────┘  │ │
+│  │                       │               │                          │ │
+│  │  ┌──────────┐  ┌──────▼───────┐  ┌────▼─────┐  ┌────────────┐  │ │
+│  │  │ Pending  │  │   Parser     │  │Embedding │  │    LLM     │  │ │
+│  │  │ Manager  │  │ PDF·Word·    │  │ Service  │  │  Service   │  │ │
+│  │  │ Auto-    │  │ Excel·PPT·MD │  │ Text+Img │  │  + Vision  │  │ │
+│  │  │ queue    │  │ Pure Go impl │  │ Batch    │  │            │  │ │
+│  │  └──────────┘  └──────────────┘  └──────────┘  └────────────┘  │ │
+│  │                                                                  │ │
+│  │  ┌──────────┐  ┌──────────────┐  ┌──────────┐  ┌────────────┐  │ │
+│  │  │  Video   │  │   Chunker    │  │  Email   │  │   Backup   │  │ │
+│  │  │  Parser  │  │  512 chars   │  │  SMTP    │  │ Full+Incr  │  │ │
+│  │  │ ffmpeg + │  │  128 overlap │  │  TLS     │  │ One-cmd    │  │ │
+│  │  │RapidSpeech│ │              │  │          │  │ restore    │  │ │
+│  │  └──────────┘  └──────────────┘  └──────────┘  └────────────┘  │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌─── 3-Level Progressive Retrieval (API Cost Optimization) ───────┐ │
+│  │                                                                  │ │
+│  │  Level 1: Local text matching ──→ Zero API cost                  │ │
+│  │     │ Char bigram similarity · Precomputed index · Cached answer │ │
+│  │     ▼                                                            │ │
+│  │  Level 2: Vector confirmation ──→ Embedding API only             │ │
+│  │     │ Embedding cache (512 entries, 10min TTL) · Cached answer   │ │
+│  │     ▼                                                            │ │
+│  │  Level 3: Full RAG ──→ Embedding + LLM                          │ │
+│  │     Intent classify → Multimodal vector search → LLM generation  │ │
+│  │                                                                  │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌─── Storage & Vector Compute Layer ──────────────────────────────┐ │
+│  │                                                                  │ │
+│  │  ┌─ SQLite (WAL) ──────────┐  ┌─ In-Memory Vector Engine ────┐ │ │
+│  │  │ Docs · Chunks · Users · │  │ Contiguous Arena (float32)   │ │ │
+│  │  │ Sessions · Products ·   │  │ Product Partition Index       │ │ │
+│  │  │ Pending · Video Segments│  │ Per-Worker Min-Heap Top-K    │ │ │
+│  │  │ FK constraints · Param  │  │ LRU Query Cache (FNV-1a)    │ │ │
+│  │  │ queries (anti-injection)│  │ Adaptive Concurrency Workers │ │ │
+│  │  └─────────────────────────┘  └──────────────────────────────┘ │ │
+│  │                                                                  │ │
+│  │  ┌─ SIMD Acceleration (20 optimizations) ─┐                     │ │
+│  │  │ AVX-512  64 floats/iter                │                     │ │
+│  │  │ AVX2+FMA 32 floats/iter                │ ← Runtime CPUID     │ │
+│  │  │ ARM NEON 16 floats/iter                │   auto-dispatch     │ │
+│  │  │ SSE / Pure Go fallback                 │                     │ │
+│  │  └────────────────────────────────────────┘                     │ │
+│  │                                                                  │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌─ Security Layer ────────────────────────────────────────────────┐ │
+│  │ AES-256-GCM encryption · bcrypt hashing · OAuth state CSRF     │ │
+│  │ IP rate limit · Failure lockout · File whitelist · CSP headers  │ │
+│  └──────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+                                 │
+                    ┌────────────▼────────────┐
+                    │  OpenAI-compatible API  │
+                    │   LLM + Embedding      │
+                    │  (any compatible host)  │
+                    └─────────────────────────┘
 ```
 
 | Component | Technology |
 |-----------|------------|
-| Backend | Go 1.25+ |
-| Database | SQLite (WAL mode, foreign keys) |
-| Vector Store | SQLite + Vec Extension (in-memory cache + HNSW vector index) |
-| Vector Processing | Semantic deduplication (Embedding similarity merge), 3-tier retrieval optimization (text → vector cache → full RAG) |
+| Backend | Go 1.25+, single binary, zero external dependencies |
+| Database | SQLite (WAL mode, foreign keys, parameterized queries) |
+| Vector Store | Contiguous memory Arena (float32) + Product partition index + LRU cache + SIMD-accelerated cosine similarity |
+| SIMD Acceleration | AVX-512 / AVX2+FMA / ARM NEON+FMLA / SSE, runtime CPUID auto-dispatch, Plan 9 assembly |
+| Retrieval Optimization | 3-level progressive matching (text → vector cache → full RAG), escalating to save API costs |
+| Deduplication | Document-level SHA-256 hash dedup + chunk-level vector reuse, avoiding redundant API calls |
 | LLM | OpenAI-compatible Chat Completion API (supports vision models) |
 | Embedding | OpenAI-compatible Embedding API (multimodal: text + image) |
-| Document Parsing | GoPDF2, GoWord, GoExcel, GoPPT |
+| Document Parsing | GoPDF2, GoWord, GoExcel, GoPPT (pure Go, zero CGO) |
 | Video Processing | ffmpeg (audio extraction + keyframe sampling) + RapidSpeech.cpp (offline local ASR) |
-| Frontend | SPA (photo gallery, media modal, streaming video; compiled assets in frontend/dist) |
-| Authentication | OAuth 2.0 + bcrypt + Session |
-| Encryption | AES-256-GCM |
-| Email | SMTP (TLS) |
+| Frontend | Vanilla JS SPA (photo gallery, media modal, streaming video, i18n) |
+| Authentication | OAuth 2.0 (Google/Apple/Amazon/Facebook) + bcrypt + Session |
+| Encryption | AES-256-GCM (API key encrypted storage) |
+| Reusable Module | sqlite-vec standalone Go module, SIMD vector engine reusable across projects |
 
 ---
 

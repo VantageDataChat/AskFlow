@@ -23,6 +23,7 @@ require (
 	github.com/richardlehane/msoleps v1.0.3 // indirect
 	go.mozilla.org/pkcs7 v0.9.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
+	pgregory.net/rapid v1.2.0 // indirect
 )
 
 replace github.com/nicexipi/sqlite-vec => ./sqlite-vec

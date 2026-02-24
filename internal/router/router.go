@@ -175,6 +175,25 @@ func Register(app *handler.App) func() {
 	// ── Public media streaming ──
 	http.HandleFunc("/api/media/", secure(handler.HandleMediaStream(app)))
 
+	// ── Shop ──
+	// ShopIsolation middleware for shop owner routes (activate, info).
+	// Auth route does NOT use ShopIsolation since the user is not yet authenticated.
+	shopIsolation := middleware.ShopIsolation(app.SessionManager(), app.ReadDB(), app.ShopService())
+	secureShop := func(h http.HandlerFunc) http.HandlerFunc {
+		return secureAPI(shopIsolation(h))
+	}
+	http.HandleFunc("/api/shop/auth", secureRL(handler.HandleShopAuth(app)))
+	http.HandleFunc("/api/shop/activate", secureShop(handler.HandleShopActivate(app)))
+	http.HandleFunc("/api/shop/info", secureShop(handler.HandleShopInfo(app)))
+
+	// ── Store Support (Marketplace integration) ──
+	http.HandleFunc("/api/store-support/register", secureRL(handler.HandleStoreSupportRegister(app)))
+	http.HandleFunc("/api/store-support/update-welcome", secure(handler.HandleStoreSupportUpdateWelcome(app)))
+
+	// ── Admin shop management ──
+	http.HandleFunc("/api/admin/shops/", secure(handler.HandleAdminShopDelete(app)))
+	http.HandleFunc("/api/admin/shops", secure(handler.HandleAdminShops(app)))
+
 	// Return cleanup function to stop rate limiter goroutines
 	return func() {
 		authRL.Stop()

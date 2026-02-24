@@ -12,6 +12,7 @@ import (
 
 	"askflow/internal/document"
 	"askflow/internal/errlog"
+	"askflow/internal/middleware"
 )
 
 // SupportedExtensions lists file extensions that can be imported.
@@ -45,6 +46,12 @@ func HandleDocuments(app *App) http.HandlerFunc {
 		productID := r.URL.Query().Get("product_id")
 		if !IsValidOptionalID(productID) {
 			WriteError(w, http.StatusBadRequest, "invalid product_id")
+			return
+		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		productID, err = resolveProductID(r, productID)
+		if err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		docs, err := app.ListDocuments(productID)
@@ -133,6 +140,13 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusBadRequest, "invalid product_id")
 			return
 		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
+		}
 		doc, err := app.UploadFile(req)
 		if err != nil {
 			errlog.Logf("[API] file upload rejected file=%q type=%s: %v", header.Filename, fileType, err)
@@ -193,6 +207,13 @@ func HandleDocumentURL(app *App) http.HandlerFunc {
 		if !IsValidOptionalID(req.ProductID) {
 			WriteError(w, http.StatusBadRequest, "invalid product_id")
 			return
+		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
 		}
 		doc, err := app.UploadURL(req)
 		if err != nil {
@@ -399,6 +420,19 @@ func HandleDocumentByID(app *App) http.HandlerFunc {
 			return
 		}
 
+		// Shop owner isolation: verify document belongs to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			docInfo, dErr := app.GetDocumentInfo(docID)
+			if dErr != nil {
+				WriteError(w, http.StatusNotFound, "文档未找到")
+				return
+			}
+			if _, err := resolveProductID(r, docInfo.ProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
+
 		if err := app.DeleteDocument(docID); err != nil {
 			log.Printf("[Documents] delete error for %s: %v", docID, err)
 			errlog.Logf("[Documents] delete failed for doc=%s: %v", docID, err)
@@ -462,6 +496,13 @@ func HandleBatchImport(app *App) http.HandlerFunc {
 				WriteError(w, http.StatusBadRequest, fmt.Sprintf("产品不存在(ID: %s)", req.ProductID))
 				return
 			}
+		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
 		}
 
 		// Validate path exists

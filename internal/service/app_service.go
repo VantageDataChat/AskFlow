@@ -25,6 +25,7 @@ import (
 	"askflow/internal/faq"
 	"askflow/internal/fontcheck"
 	"askflow/internal/handler"
+	"askflow/internal/shop"
 	"askflow/internal/llm"
 	"askflow/internal/parser"
 	"askflow/internal/pending"
@@ -47,6 +48,7 @@ type AppService struct {
 	emailService    *email.Service
 	productService  *product.ProductService
 	faqService      *faq.Service
+	shopService     *shop.ShopService
 	cfg             *config.Config
 	dataDir         string
 	sessionCleanup  chan struct{}
@@ -143,6 +145,10 @@ func (as *AppService) Initialize(dataDir string, overrideBind string, overridePo
 	as.productService = product.NewProductService(readDB, writeDB)
 	as.faqService = faq.NewService(readDB, writeDB)
 	as.faqService.SetEmbedding(es.Embed, vectorstore.CosineSimilarity)
+
+	// Initialize shop support services
+	marketClient := shop.NewMarketClient(as.cfg.MarketBaseURL)
+	as.shopService = shop.NewShopService(readDB, writeDB, marketClient, as.productService)
 	as.queryEngine = query.NewQueryEngine(es, vs, ls, writeDB, readDB, as.cfg)
 	as.pendingManager = pending.NewPendingQuestionManager(writeDB, tc, es, vs, ls)
 	as.oauthClient = auth.NewOAuthClient(as.cfg.OAuth.Providers)
@@ -308,6 +314,7 @@ func (as *AppService) CreateApp() *handler.App {
 		as.emailService,
 		as.productService,
 		as.faqService,
+		as.shopService,
 	)
 }
 

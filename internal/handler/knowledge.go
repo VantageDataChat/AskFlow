@@ -192,6 +192,13 @@ func HandleKnowledgeEntry(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+			WriteError(w, http.StatusForbidden, err.Error())
+			return
+		} else {
+			req.ProductID = pid
+		}
 		if err := app.AddKnowledgeEntry(req); err != nil {
 			WriteError(w, http.StatusBadRequest, err.Error())
 			return

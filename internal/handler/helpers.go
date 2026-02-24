@@ -6,7 +6,29 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"askflow/internal/middleware"
 )
+
+// resolveProductID returns the effective product_id for the request.
+// For shop owners, it enforces their shop_module_product_id:
+//   - If the request includes a product_id that differs from the shop's, returns a 403 error.
+//   - Otherwise, forces the product_id to the shop's shop_module_product_id.
+//
+// For non-shop users (admins, regular users), the requestedProductID is returned as-is.
+func resolveProductID(r *http.Request, requestedProductID string) (string, error) {
+	if !middleware.IsShopOwner(r.Context()) {
+		return requestedProductID, nil
+	}
+	shopProductID, ok := middleware.GetShopModuleProductID(r.Context())
+	if !ok {
+		return "", fmt.Errorf("权限不足")
+	}
+	if requestedProductID != "" && requestedProductID != shopProductID {
+		return "", fmt.Errorf("权限不足")
+	}
+	return shopProductID, nil
+}
 
 // ForbiddenError represents a 403 Forbidden error, distinct from 401 Unauthorized.
 type ForbiddenError struct {

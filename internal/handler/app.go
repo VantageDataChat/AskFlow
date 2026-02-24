@@ -30,6 +30,7 @@ import (
 	"askflow/internal/pending"
 	"askflow/internal/product"
 	"askflow/internal/query"
+	"askflow/internal/shop"
 	"askflow/internal/vectorstore"
 )
 
@@ -50,6 +51,7 @@ type App struct {
 	emailService   *email.Service
 	productService *product.ProductService
 	faqService     *faq.Service
+	shopService    *shop.ShopService
 	loginLimiter   *auth.LoginLimiter
 }
 
@@ -66,6 +68,7 @@ func NewApp(
 	es *email.Service,
 	ps *product.ProductService,
 	fs *faq.Service,
+	ss *shop.ShopService,
 ) *App {
 	return &App{
 		db:             writeDB,
@@ -79,12 +82,23 @@ func NewApp(
 		emailService:   es,
 		productService: ps,
 		faqService:     fs,
+		shopService:    ss,
 		loginLimiter:   auth.NewLoginLimiterRW(readDB, writeDB),
 	}
 }
 // SessionManager returns the session manager for testing purposes.
 func (a *App) SessionManager() *auth.SessionManager {
 	return a.sessionManager
+}
+
+// ReadDB returns the read-only database connection.
+func (a *App) ReadDB() *sql.DB {
+	return a.readDB
+}
+
+// ShopService returns the shop service instance.
+func (a *App) ShopService() *shop.ShopService {
+	return a.shopService
 }
 
 // --- Query Interface ---
@@ -147,6 +161,16 @@ func (a *App) AnswerQuestion(req pending.AdminAnswerRequest) error {
 // DeletePendingQuestion removes a pending question by ID.
 func (a *App) DeletePendingQuestion(id string) error {
 	return a.pendingManager.DeletePending(id)
+}
+
+// GetPendingQuestionProductID returns the product_id for a pending question by its ID.
+func (a *App) GetPendingQuestionProductID(id string) (string, error) {
+	var productID string
+	err := a.readDB.QueryRow(`SELECT COALESCE(product_id, '') FROM pending_questions WHERE id = ?`, id).Scan(&productID)
+	if err != nil {
+		return "", fmt.Errorf("pending question not found")
+	}
+	return productID, nil
 }
 
 // CreatePendingQuestion creates a new pending question from a user who is not satisfied with the answer.
@@ -1513,6 +1537,16 @@ func (a *App) ReorderFAQ(ids []string) error {
 		return fmt.Errorf("FAQ service not available")
 	}
 	return a.faqService.Reorder(ids)
+}
+
+// GetFAQProductID returns the product_id for a FAQ entry by its ID.
+func (a *App) GetFAQProductID(id string) (string, error) {
+	var productID string
+	err := a.readDB.QueryRow(`SELECT product_id FROM faq_entries WHERE id = ?`, id).Scan(&productID)
+	if err != nil {
+		return "", fmt.Errorf("FAQ entry not found")
+	}
+	return productID, nil
 }
 
 // --- Customer Management ---

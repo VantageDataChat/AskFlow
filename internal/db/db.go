@@ -104,6 +104,16 @@ func InitDB(dbPath string) (*DBPair, error) {
 		return nil, fmt.Errorf("failed to create product tables: %w", err)
 	}
 
+	if err := createLoginAttemptsTable(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create login_attempts table: %w", err)
+	}
+
+	if err := createFAQTable(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create faq table: %w", err)
+	}
+
 	if err := migrateTables(writeDB); err != nil {
 		cleanup()
 		return nil, err
@@ -114,14 +124,9 @@ func InitDB(dbPath string) (*DBPair, error) {
 		return nil, fmt.Errorf("failed to migrate product tables: %w", err)
 	}
 
-	if err := createLoginAttemptsTable(writeDB); err != nil {
+	if err := createShopTables(writeDB); err != nil {
 		cleanup()
-		return nil, fmt.Errorf("failed to create login_attempts table: %w", err)
-	}
-
-	if err := createFAQTable(writeDB); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("failed to create faq table: %w", err)
+		return nil, fmt.Errorf("failed to create shop tables: %w", err)
 	}
 
 	if err := createIndexes(writeDB); err != nil {
@@ -335,7 +340,6 @@ func migrateProductTables(db *sql.DB) error {
 		{"products", "welcome_message", "ALTER TABLE products ADD COLUMN welcome_message TEXT DEFAULT ''"},
 		{"products", "type", "ALTER TABLE products ADD COLUMN type TEXT DEFAULT 'service'"},
 		{"products", "allow_download", "ALTER TABLE products ADD COLUMN allow_download INTEGER DEFAULT 0"},
-		{"faq_entries", "embedding", "ALTER TABLE faq_entries ADD COLUMN embedding TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {
@@ -380,10 +384,61 @@ func createFAQTable(db *sql.DB) error {
 		normalized TEXT NOT NULL,
 		weight     INTEGER NOT NULL DEFAULT 1,
 		sort_order INTEGER NOT NULL DEFAULT 0,
+		embedding  TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Migrate existing faq_entries tables that lack the embedding column.
+	if !columnExists(db, "faq_entries", "embedding") {
+		if _, err := db.Exec("ALTER TABLE faq_entries ADD COLUMN embedding TEXT DEFAULT ''"); err != nil {
+			return fmt.Errorf("migration failed (faq_entries.embedding): %w", err)
+		}
+	}
+	return nil
+}
+
+// createShopTables creates the shops and shop_activation_requests tables
+// for the shop support module. Called after createProductTables since shops
+// references both sn_users and products.
+func createShopTables(db *sql.DB) error {
+	tables := []string{
+		`CREATE TABLE IF NOT EXISTS shops (
+			id                     TEXT PRIMARY KEY,
+			name                   TEXT NOT NULL,
+			owner_id               INTEGER NOT NULL,
+			storefront_id          INTEGER DEFAULT 0,
+			software_name          TEXT NOT NULL DEFAULT 'vantagics',
+			description            TEXT DEFAULT '',
+			welcome_message        TEXT DEFAULT '',
+			status                 TEXT NOT NULL DEFAULT 'pending',
+			parent_product_id      TEXT NOT NULL DEFAULT '',
+			shop_module_product_id TEXT DEFAULT '',
+			created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (owner_id) REFERENCES sn_users(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS shop_activation_requests (
+			id              TEXT PRIMARY KEY,
+			shop_id         TEXT NOT NULL,
+			software_name   TEXT NOT NULL,
+			shop_name       TEXT NOT NULL,
+			market_response TEXT DEFAULT '',
+			status          TEXT NOT NULL DEFAULT 'pending',
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (shop_id) REFERENCES shops(id)
+		)`,
+	}
+
+	for _, ddl := range tables {
+		if _, err := db.Exec(ddl); err != nil {
+			return fmt.Errorf("failed to create shop table: %w", err)
+		}
+	}
+	return nil
 }
 
 // createIndexes adds indexes for frequently queried columns.
@@ -416,6 +471,12 @@ func createIndexes(db *sql.DB) error {
 		// FAQ indexes
 		`CREATE INDEX IF NOT EXISTS idx_faq_entries_product_weight ON faq_entries(product_id, weight DESC)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_faq_entries_product_normalized ON faq_entries(product_id, normalized)`,
+
+		// Shop indexes
+		`CREATE INDEX IF NOT EXISTS idx_shops_owner_id ON shops(owner_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_shops_parent_product_id ON shops(parent_product_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_shops_shop_module_product_id ON shops(shop_module_product_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_shop_activation_requests_shop_id ON shop_activation_requests(shop_id)`,
 	}
 	for _, idx := range indexes {
 		if _, err := db.Exec(idx); err != nil {
@@ -445,6 +506,8 @@ func migrateTables(db *sql.DB) error {
 		{"chunks", "product_id", "ALTER TABLE chunks ADD COLUMN product_id TEXT DEFAULT ''"},
 		{"pending_questions", "product_id", "ALTER TABLE pending_questions ADD COLUMN product_id TEXT DEFAULT ''"},
 		{"admin_users", "permissions", "ALTER TABLE admin_users ADD COLUMN permissions TEXT DEFAULT ''"},
+		{"shops", "storefront_id", "ALTER TABLE shops ADD COLUMN storefront_id INTEGER DEFAULT 0"},
+		{"shops", "welcome_message", "ALTER TABLE shops ADD COLUMN welcome_message TEXT DEFAULT ''"},
 	}
 
 	for _, m := range migrations {
@@ -467,6 +530,7 @@ func columnExists(db *sql.DB, table, column string) bool {
 		"email_tokens": true, "admin_users": true,
 		"products": true, "admin_user_products": true,
 		"video_segments": true, "faq_entries": true,
+		"shops": true, "shop_activation_requests": true,
 	}
 	if !validTables[table] {
 		return false

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"askflow/internal/faq"
+	"askflow/internal/middleware"
 )
 
 // HandleFAQ handles GET (list top FAQ for a product).
@@ -25,6 +26,15 @@ func HandleFAQ(app *App) http.HandlerFunc {
 		if productID != "" && !IsValidOptionalID(productID) {
 			WriteError(w, http.StatusBadRequest, "invalid product_id")
 			return
+		}
+		// Shop owner isolation: force product_id to shop's module product ID.
+		if middleware.IsShopOwner(r.Context()) {
+			pid, err := resolveProductID(r, productID)
+			if err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			productID = pid
 		}
 		if productID == "" {
 			WriteJSON(w, http.StatusOK, map[string]interface{}{"faqs": []interface{}{}})
@@ -66,6 +76,12 @@ func HandleFAQAdminList(app *App) http.HandlerFunc {
 				WriteError(w, http.StatusBadRequest, "invalid product_id")
 				return
 			}
+			// Shop owner isolation: force product_id to shop's module product ID.
+			productID, err = resolveProductID(r, productID)
+			if err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 			if productID == "" {
 				WriteJSON(w, http.StatusOK, map[string]interface{}{"faqs": []interface{}{}})
 				return
@@ -96,6 +112,13 @@ func HandleFAQAdminList(app *App) http.HandlerFunc {
 			if req.ProductID == "" || !IsValidOptionalID(req.ProductID) {
 				WriteError(w, http.StatusBadRequest, "invalid product_id")
 				return
+			}
+			// Shop owner isolation: force product_id to shop's module product ID.
+			if pid, err := resolveProductID(r, req.ProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			} else {
+				req.ProductID = pid
 			}
 			entry, err := app.CreateFAQ(req.ProductID, req.Question)
 			if err != nil {
@@ -160,6 +183,19 @@ func HandleFAQAdminByID(app *App) http.HandlerFunc {
 		if id == "" || id == r.URL.Path || !IsValidHexID(id) {
 			WriteError(w, http.StatusBadRequest, "invalid FAQ ID")
 			return
+		}
+
+		// Shop owner isolation: verify FAQ entry belongs to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			faqProductID, fErr := app.GetFAQProductID(id)
+			if fErr != nil {
+				WriteError(w, http.StatusNotFound, "FAQ not found")
+				return
+			}
+			if _, err := resolveProductID(r, faqProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 
 		switch r.Method {

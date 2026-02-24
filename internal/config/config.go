@@ -37,7 +37,8 @@ type Config struct {
 	ProductIntro string          `json:"product_intro"`
 	ProductName  string          `json:"product_name"`
 	Video        VideoConfig     `json:"video"`
-	AuthServer   string          `json:"auth_server"` // license verification server host, e.g. "license.vantagedata.chat"
+	AuthServer    string          `json:"auth_server"`     // license verification server host, e.g. "license.vantagedata.chat"
+	MarketBaseURL string          `json:"market_base_url"` // Market service base URL for shop activation queries
 }
 
 
@@ -625,6 +626,16 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("auth_server too long (max 200 characters)")
 		}
 		cm.config.AuthServer = s
+
+	case "market_base_url":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		if len(s) > 500 {
+			return errors.New("market_base_url too long (max 500 characters)")
+		}
+		cm.config.MarketBaseURL = s
 
 	// Video fields
 	case "video.ffmpeg_path":
