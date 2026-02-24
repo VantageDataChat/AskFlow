@@ -560,9 +560,9 @@ func handleStoreScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID i
 	// Resolve the shop (by storefront_id, fallback to owner_id).
 	foundShop, err := app.shopService.ResolveForLogin(storeID, ti.SNUserID)
 	if err != nil {
-		log.Printf("[TicketExchange/store] ResolveForLogin error: %v", err)
+		log.Printf("[TicketExchange/store] ResolveForLogin error: store_id=%d sn_user_id=%d err=%v", storeID, ti.SNUserID, err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "message": "internal error",
+			"success": false, "message": "shop_resolve_error: " + err.Error(),
 		})
 		return
 	}
@@ -575,12 +575,15 @@ func handleStoreScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID i
 		return
 	}
 
+	log.Printf("[TicketExchange/store] shop found: id=%s name=%q status=%s module_product=%s",
+		foundShop.ID, foundShop.Name, foundShop.Status, foundShop.ShopModuleProductID)
+
 	// Create admin session for the store owner.
 	sessionID, _, err := app.CreateStoreAdminSession(foundShop)
 	if err != nil {
-		log.Printf("[TicketExchange/store] CreateStoreAdminSession error: %v", err)
+		log.Printf("[TicketExchange/store] CreateStoreAdminSession error: shop=%s err=%v", foundShop.ID, err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "message": "internal error",
+			"success": false, "message": "admin_session_error: " + err.Error(),
 		})
 		return
 	}
@@ -610,9 +613,9 @@ func handleCustomerScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeI
 	// Create a regular user session.
 	sessionID, err := app.CreateUserSession(ti.Email, ti.DisplayName)
 	if err != nil {
-		log.Printf("[TicketExchange/customer] CreateUserSession error: %v", err)
+		log.Printf("[TicketExchange/customer] CreateUserSession error: email=%s err=%v", ti.Email, err)
 		WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-			"success": false, "message": "internal error",
+			"success": false, "message": "user_session_error: " + err.Error(),
 		})
 		return
 	}

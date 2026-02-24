@@ -2075,6 +2075,15 @@ func (a *App) CreateStoreAdminSession(foundShop *shop.Shop) (sessionID, subAdmin
 	}
 
 	adminSessionUserID := "admin_" + subAdminID
+
+	// Ensure a users row exists for the FK constraint on sessions table.
+	// (sessions.user_id → users.id)
+	username := "store_" + foundShop.ID
+	a.db.Exec(
+		`INSERT OR IGNORE INTO users (id, email, name, provider, provider_id) VALUES (?, ?, ?, ?, ?)`,
+		adminSessionUserID, adminSessionUserID+"@internal", username, "admin_sub", subAdminID,
+	)
+
 	session, err := a.sessionManager.CreateSession(adminSessionUserID)
 	if err != nil {
 		return "", "", fmt.Errorf("create admin session: %w", err)
