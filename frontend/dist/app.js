@@ -909,12 +909,13 @@
         // then load products into selector. This ensures askflow_product_id is set
         // before loadChatProducts reads it to select the correct option.
         resolveInitialProduct(function (productFetchMode) {
-            loadChatProducts(productFetchMode);
-            if (chatMessages.length === 0) {
-                loadWelcomeMessage();
-            } else {
-                renderChatMessages();
-            }
+            loadChatProducts(productFetchMode, function () {
+                if (chatMessages.length === 0) {
+                    loadWelcomeMessage();
+                } else {
+                    renderChatMessages();
+                }
+            });
         });
 
         setupChatInput();
@@ -931,15 +932,16 @@
 
     // Load products into the chat header product selector.
     // productFetchMode: 'shop:ID' for market customers, 'default' otherwise.
-    function loadChatProducts(productFetchMode) {
+    function loadChatProducts(productFetchMode, onReady) {
         var selector = document.getElementById('chat-product-selector');
         var defaultSelect = document.getElementById('chat-default-product');
-        if (!selector) return;
+        if (!selector) { if (onReady) onReady(); return; }
 
         fetchProducts(productFetchMode || 'default')
             .then(function (products) {
                 if (products.length === 0) {
                     selector.classList.add('hidden');
+                    if (onReady) onReady();
                     return;
                 }
                 // Populate chat header selector (no "all products" option)
@@ -952,6 +954,7 @@
                 });
                 if (filtered.length === 0) {
                     selector.classList.add('hidden');
+                    if (onReady) onReady();
                     return;
                 }
                 for (var i = 0; i < filtered.length; i++) {
@@ -1015,9 +1018,11 @@
                         loadWelcomeMessage();
                     });
                 }
+                if (onReady) onReady();
             })
             .catch(function () {
                 selector.classList.add('hidden');
+                if (onReady) onReady();
             });
     }
 
