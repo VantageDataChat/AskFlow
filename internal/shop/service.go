@@ -302,31 +302,6 @@ func (s *ShopService) ListAll() ([]Shop, error) {
 	}
 	return shops, nil
 }
-// FixPendingShop activates a pending shop by creating its child product.
-// This is used to auto-fix shops that were created before the no-approval logic was deployed.
-func (s *ShopService) FixPendingShop(shop *Shop) error {
-	if shop.Status != StatusPending {
-		return nil
-	}
-	welcomeMsg := shop.WelcomeMessage
-	if welcomeMsg == "" {
-		welcomeMsg = "欢迎来到 " + shop.Name + " 的客户支持"
-	}
-	childProduct, err := s.findOrCreateProduct(shop.Name, welcomeMsg)
-	if err != nil {
-		return fmt.Errorf("failed to create shop module product: %w", err)
-	}
-	_, err = s.writeDB.Exec(
-		`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
-		StatusApproved, childProduct.ID, time.Now(), shop.ID,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update shop status: %w", err)
-	}
-	log.Printf("[ShopAutoFix] activated pending shop %q (id=%s), product=%s", shop.Name, shop.ID, childProduct.ID)
-	return nil
-}
-
 
 
 // Register creates a new shop support record from a Marketplace registration request.
