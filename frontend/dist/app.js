@@ -2241,6 +2241,9 @@
         if (tabId === 'settings-logs') {
             loadRecentLogs();
         }
+        if (tabId === 'settings-login-logs') {
+            loadRecentLoginLogs();
+        }
     };
 
     // --- SMTP Presets ---
@@ -3947,6 +3950,107 @@
         });
     };
 
+    // --- Login Log Management ---
+
+    window.loadRecentLoginLogs = function () {
+        var content = document.getElementById('login-log-viewer-content');
+        if (!content) return;
+        content.textContent = i18n.t('admin_doc_review_loading');
+        adminFetch('/api/login-logs/recent?lines=50')
+            .then(function (res) {
+                if (!res.ok) throw new Error(i18n.t('admin_doc_load_failed'));
+                return res.json();
+            })
+            .then(function (data) {
+                var lines = data.lines || [];
+                var rotMB = data.rotation_mb || 100;
+                var rotInput = document.getElementById('cfg-login-log-rotation-mb');
+                if (rotInput) rotInput.value = rotMB;
+                if (lines.length === 0) {
+                    content.innerHTML = '<span style="color:#94a3b8;">暂无登录日志</span>';
+                    return;
+                }
+                var html = '';
+                lines.forEach(function (line) {
+                    var escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    escaped = escaped.replace(/^(\d{4}\/\d{2}\/\d{2}\s+\d{2}:\d{2}:\d{2})/, '<span class="log-line-time">$1</span>');
+                    escaped = escaped.replace(/\[LOGIN\]/, '<span style="color:#22c55e;font-weight:600;">[LOGIN]</span>');
+                    escaped = escaped.replace(/\[LOGIN_FAILED\]/, '<span class="log-line-error">[LOGIN_FAILED]</span>');
+                    escaped = escaped.replace(/\[LOGOUT\]/, '<span style="color:#f59e0b;font-weight:600;">[LOGOUT]</span>');
+                    escaped = escaped.replace(/\[SESSION_EXPIRED\]/, '<span style="color:#f59e0b;font-weight:600;">[SESSION_EXPIRED]</span>');
+                    html += escaped + '\n';
+                });
+                content.innerHTML = html;
+                var viewer = document.getElementById('login-log-viewer');
+                if (viewer) viewer.scrollTop = viewer.scrollHeight;
+            })
+            .catch(function (err) {
+                content.textContent = '加载登录日志失败: ' + (err.message || '未知错误');
+            });
+    };
+
+    window.saveLoginLogRotation = function () {
+        var input = document.getElementById('cfg-login-log-rotation-mb');
+        if (!input) return;
+        var val = parseInt(input.value, 10);
+        if (isNaN(val) || val < 1 || val > 10240) {
+            showAdminToast(i18n.t('admin_logs_rotation_range_error'), 'error');
+            return;
+        }
+        adminFetch('/api/login-logs/rotation', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rotation_mb: val })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_logs_save_failed')); });
+            showAdminToast(i18n.t('admin_logs_rotation_saved'), 'success');
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_logs_save_failed'), 'error');
+        });
+    };
+
+    window.downloadLoginLogs = function () {
+        adminFetch('/api/login-logs/download')
+        .then(function (res) {
+            if (!res.ok) throw new Error(i18n.t('admin_logs_download_failed'));
+            return res.blob();
+        })
+        .then(function (blob) {
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'userlogin_log.gz';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showAdminToast(i18n.t('admin_logs_download_done'), 'success');
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_logs_download_failed'), 'error');
+        });
+    };
+
+    window.confirmClearLoginLogs = function () {
+        if (!confirm('确定要清空所有登录日志吗？此操作不可恢复。')) {
+            return;
+        }
+        adminFetch('/api/login-logs/clear', { method: 'DELETE' })
+        .then(function (res) {
+            if (!res.ok) throw new Error(i18n.t('admin_logs_clear_failed'));
+            return res.json();
+        })
+        .then(function (data) {
+            showAdminToast(i18n.t('admin_logs_clear_done'), 'success');
+            loadRecentLoginLogs();
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_logs_clear_failed'), 'error');
+        });
+    };
+
     // --- Multimodal Settings ---
 
     function loadMultimodalSettings() {
@@ -4518,7 +4622,13 @@
             body: JSON.stringify(body)
         })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.message || 'ticket login failed'); });
+            if (!res.ok) {
+                return res.text().then(function (text) {
+                    var msg = 'ticket login failed (HTTP ' + res.status + ')';
+                    try { var d = JSON.parse(text); msg = d.message || d.error || msg; } catch (e) { /* not JSON */ }
+                    throw new Error(msg);
+                });
+            }
             return res.json();
         })
         .then(function (data) {
@@ -4565,6 +4675,7 @@
             }
         })
         .catch(function (err) {
+            showToast(err.message || 'ticket login failed', 'error');
             window.history.replaceState({}, '', '/login?error=ticket_failed');
             handleRoute();
         });

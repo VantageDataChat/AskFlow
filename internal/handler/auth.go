@@ -424,10 +424,15 @@ func HandleSNLogin(app *App) http.HandlerFunc {
 		}
 		var req SNLoginRequest
 		if err := ReadJSONBody(r, &req); err != nil {
+			log.Printf("[SNLogin] ReadJSONBody error: %v", err)
 			WriteJSON(w, http.StatusBadRequest, SNLoginResponse{Success: false, Message: "token is required"})
 			return
 		}
-		resp, status, err := app.HandleSNLogin(req.GetToken())
+		effectiveToken := req.GetToken()
+		if effectiveToken == "" {
+			log.Printf("[SNLogin] empty token: token=%q license_token=%q", req.Token, req.LicenseToken)
+		}
+		resp, status, err := app.HandleSNLogin(effectiveToken)
 		if err != nil {
 			WriteJSON(w, http.StatusInternalServerError, SNLoginResponse{Success: false, Message: "internal error"})
 			return
@@ -518,6 +523,8 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 
 		sessionID, err := app.ValidateLoginTicket(req.Ticket)
 		if err != nil {
+			log.Printf("[TicketExchange] ValidateLoginTicket failed: ticket=%q scope=%q store_id=%d err=%v",
+				req.Ticket, req.Scope, req.StoreID, err)
 			status := http.StatusUnauthorized
 			WriteJSON(w, status, map[string]interface{}{
 				"success": false, "message": err.Error(),
