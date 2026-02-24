@@ -1515,7 +1515,7 @@ a.chat-source-download:hover {
     backdrop-filter: blur(8px);
     border-radius: 0 0 var(--radius-lg) var(--radius-lg);
     min-height: calc(100vh - 100px);
-    overflow-x: hidden;
+    overflow-x: auto;
 }
 
 /* Upload Section */
@@ -1672,6 +1672,11 @@ a.chat-source-download:hover {
     border: 1px solid rgba(37,99,235,0.08);
 }
 
+[id$="-table-wrap"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
 .admin-table th,
 .admin-table td {
     padding: 0.75rem 1rem;
@@ -1789,6 +1794,12 @@ a.chat-source-download:hover {
 
 /* Settings Form */
 .admin-settings-form {
+    max-width: 100%;
+}
+
+.admin-settings-form .admin-form-row input,
+.admin-settings-form .admin-form-row textarea,
+.admin-settings-form .admin-form-row select {
     max-width: 640px;
 }
 
@@ -2521,6 +2532,10 @@ a.chat-source-download:hover {
 }
 
 #page-admin-login .login-container {
+    align-items: center;
+}
+
+#page-setup .login-container {
     align-items: center;
 }
 
