@@ -27,7 +27,8 @@ func HandleAdminUsers(app *App) http.HandlerFunc {
 				WriteError(w, http.StatusForbidden, "仅超级管理员可管理用户")
 				return
 			}
-			users, err := app.ListAdminUsers()
+			filterType := r.URL.Query().Get("type") // "system", "store", or "" (all)
+			users, err := app.ListAdminUsers(filterType)
 			if err != nil {
 				log.Printf("[Admin] list users error: %v", err)
 				WriteError(w, http.StatusInternalServerError, "获取用户列表失败")

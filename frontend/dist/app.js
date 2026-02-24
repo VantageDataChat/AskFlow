@@ -4485,6 +4485,14 @@
             return res.json();
         })
         .then(function (data) {
+            // Handle store login failure — shop not found
+            if (data.store_error && !data.session && !data.admin_session) {
+                showToast(data.store_error, 'error');
+                window.history.replaceState({}, '', '/login');
+                handleRoute();
+                return;
+            }
+
             // Handle store scope — store owner management session (no regular session)
             if (data.store && data.store.scope === 'store' && data.admin_session) {
                 saveAdminSession(data.admin_session, data.admin_user);
@@ -5183,7 +5191,10 @@
     // --- Admin User Management ---
 
     function loadAdminUsers() {
-        adminFetch('/api/admin/users')
+        var filter = (document.getElementById('admin-users-filter') || {}).value || '';
+        var url = '/api/admin/users';
+        if (filter) url += '?type=' + encodeURIComponent(filter);
+        adminFetch(url)
             .then(function (res) {
                 if (!res.ok) throw new Error(i18n.t('admin_doc_load_failed'));
                 return res.json();

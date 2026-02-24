@@ -2535,6 +2535,15 @@
 
                                     <legend data-i18n="admin_users_list_legend">管理员账号列表</legend>
 
+                                    <div style="margin-bottom:0.8rem;">
+                                        <label data-i18n="admin_users_filter_label" style="margin-right:0.5rem;">筛选类型</label>
+                                        <select id="admin-users-filter" onchange="loadAdminUsers()" style="padding:0.3rem 0.6rem;border:1px solid #d0d5dd;border-radius:6px;">
+                                            <option value="" data-i18n="admin_users_filter_all">全部</option>
+                                            <option value="system" data-i18n="admin_users_filter_system">系统管理员</option>
+                                            <option value="store" data-i18n="admin_users_filter_store">店铺子管理员</option>
+                                        </select>
+                                    </div>
+
                                     <div id="admin-users-table-wrap">
 
                                         <table class="admin-table">

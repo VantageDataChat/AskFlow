@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -40,9 +39,24 @@ func generateID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// findOrCreateProduct creates a new product or returns an existing one if the name is taken.
+func (s *ShopService) findOrCreateProduct(name, welcomeMsg string) (*product.Product, error) {
+	p, err := s.productSvc.Create(name, product.ProductTypeKnowledgeBase, welcomeMsg, welcomeMsg, false)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		// Product name taken — find and reuse the existing one
+		existing, lookupErr := s.productSvc.GetByName(name)
+		if lookupErr != nil || existing == nil {
+			return nil, fmt.Errorf("product name conflict and lookup failed: %w", err)
+		}
+		log.Printf("[Shop] reusing existing product %q (id=%s)", name, existing.ID)
+		return existing, nil
+	}
+	return p, err
+}
+
 // Activate processes a shop activation request.
-// It validates input, checks for duplicate shops, creates DB records,
-// queries Market service for approval, and generates a child product if approved.
+// It validates input, checks for duplicate shops, creates a child product,
+// and inserts the shop record as approved.
 func (s *ShopService) Activate(req ActivateRequest) (*ActivateResponse, error) {
 	// 1. Validate required fields
 	softwareName := strings.TrimSpace(req.SoftwareName)
@@ -70,107 +84,76 @@ func (s *ShopService) Activate(req ActivateRequest) (*ActivateResponse, error) {
 			}, nil
 		}
 
-		// Still pending — retry activation with Market service
-		marketStatus, retryErr := s.marketClient.QueryStatus(softwareName, existingShop.Name)
-		if retryErr != nil {
-			log.Printf("[ShopActivate] market retry error for shop %q: %v", existingShop.Name, retryErr)
-			return &ActivateResponse{
-				Shop:    existingShop,
-				Status:  existingShop.Status,
-				Message: "shop pending, market service unavailable",
-			}, nil
+		// Still pending — complete activation now (no approval step)
+		desc := existingShop.Description
+		if desc == "" {
+			desc = req.Description
+		}
+		welcomeMsg := desc
+		if welcomeMsg == "" {
+			welcomeMsg = "欢迎来到 " + existingShop.Name + " 的客户支持"
+		}
+		childProduct, cpErr := s.findOrCreateProduct(existingShop.Name, welcomeMsg)
+		if cpErr != nil {
+			return nil, fmt.Errorf("failed to create shop module product: %w", cpErr)
 		}
 
-		if marketStatus.Approved {
-			desc := existingShop.Description
-			if desc == "" {
-				desc = req.Description
-			}
-			childProduct, cpErr := s.productSvc.Create(
-				existingShop.Name,
-				product.ProductTypeKnowledgeBase,
-				desc,
-				desc,
-				false,
-			)
-			if cpErr != nil {
-				return nil, fmt.Errorf("failed to create shop module product: %w", cpErr)
-			}
-
-			updatedAt := time.Now()
-			_, updErr := s.writeDB.Exec(
-				`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
-				StatusApproved, childProduct.ID, updatedAt, existingShop.ID,
-			)
-			if updErr != nil {
-				return nil, fmt.Errorf("failed to update shop status: %w", updErr)
-			}
-
-			existingShop.Status = StatusApproved
-			existingShop.ShopModuleProductID = childProduct.ID
-			existingShop.UpdatedAt = updatedAt
-
-			return &ActivateResponse{
-				Shop:                existingShop,
-				Status:              StatusApproved,
-				Message:             "shop activated successfully",
-				ShopModuleProductID: childProduct.ID,
-			}, nil
+		updatedAt := time.Now()
+		_, updErr := s.writeDB.Exec(
+			`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
+			StatusApproved, childProduct.ID, updatedAt, existingShop.ID,
+		)
+		if updErr != nil {
+			return nil, fmt.Errorf("failed to update shop status: %w", updErr)
 		}
 
-		// Still not approved
+		existingShop.Status = StatusApproved
+		existingShop.ShopModuleProductID = childProduct.ID
+		existingShop.UpdatedAt = updatedAt
+
+		log.Printf("[ShopActivate] activated existing shop %q (id=%s) for owner %d, product=%s",
+			existingShop.Name, existingShop.ID, req.OwnerID, childProduct.ID)
+
 		return &ActivateResponse{
-			Shop:    existingShop,
-			Status:  existingShop.Status,
-			Message: "shop activation pending approval",
+			Shop:                existingShop,
+			Status:              StatusApproved,
+			Message:             "shop activated successfully",
+			ShopModuleProductID: childProduct.ID,
 		}, nil
 	}
 
-	// 3. Generate IDs
+	// 3. Generate shop ID
 	shopID, err := generateID()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate shop ID: %w", err)
 	}
-	requestID, err := generateID()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate request ID: %w", err)
-	}
 
 	now := time.Now()
 
-	// 4. Insert shop record with pending status
+	desc := strings.TrimSpace(req.Description)
+	welcomeMsg := desc
+	if welcomeMsg == "" {
+		welcomeMsg = "欢迎来到 " + shopName + " 的客户支持"
+	}
+
+	// 4. Create child product immediately (no approval step)
+	childProduct, err := s.findOrCreateProduct(shopName, welcomeMsg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create shop module product: %w", err)
+	}
+
+	// 5. Insert shop record as approved
 	_, err = s.writeDB.Exec(
 		`INSERT INTO shops (id, name, owner_id, storefront_id, software_name, description, welcome_message, status, parent_product_id, shop_module_product_id, created_at, updated_at)
-		 VALUES (?, ?, ?, 0, ?, ?, '', ?, ?, '', ?, ?)`,
-		shopID, shopName, req.OwnerID, softwareName, req.Description, StatusPending, req.ParentProductID, now, now,
+		 VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		shopID, shopName, req.OwnerID, softwareName, desc, welcomeMsg, StatusApproved, req.ParentProductID, childProduct.ID, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create shop record: %w", err)
 	}
 
-	// 5. Insert activation request record
-	_, err = s.writeDB.Exec(
-		`INSERT INTO shop_activation_requests (id, shop_id, software_name, shop_name, market_response, status, created_at)
-		 VALUES (?, ?, ?, ?, '', ?, ?)`,
-		requestID, shopID, softwareName, shopName, StatusPending, now,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create activation request: %w", err)
-	}
-
-	// 6. Query Market service for approval status
-	marketStatus, err := s.marketClient.QueryStatus(softwareName, shopName)
-	if err != nil {
-		log.Printf("market service error for shop %q: %v", shopName, err)
-		return nil, fmt.Errorf("market service unavailable: %w", err)
-	}
-
-	// Store market response in activation request
-	marketRespJSON, _ := json.Marshal(marketStatus)
-	s.writeDB.Exec(
-		`UPDATE shop_activation_requests SET market_response = ? WHERE id = ?`,
-		string(marketRespJSON), requestID,
-	)
+	log.Printf("[ShopActivate] created and activated shop %q (id=%s) for owner %d, product=%s",
+		shopName, shopID, req.OwnerID, childProduct.ID)
 
 	shop := &Shop{
 		ID:                  shopID,
@@ -178,67 +161,20 @@ func (s *ShopService) Activate(req ActivateRequest) (*ActivateResponse, error) {
 		OwnerID:             req.OwnerID,
 		StorefrontID:        0,
 		SoftwareName:        softwareName,
-		Description:         req.Description,
-		WelcomeMessage:      "",
-		Status:              StatusPending,
+		Description:         desc,
+		WelcomeMessage:      welcomeMsg,
+		Status:              StatusApproved,
 		ParentProductID:     req.ParentProductID,
-		ShopModuleProductID: "",
+		ShopModuleProductID: childProduct.ID,
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}
 
-	// 7. If approved: update shop status, create child product, update shop_module_product_id
-	if marketStatus.Approved {
-		// Create child product using description as welcome_message
-		childProduct, err := s.productSvc.Create(
-			shopName,
-			product.ProductTypeKnowledgeBase,
-			req.Description,
-			req.Description, // welcome_message = description
-			false,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create shop module product: %w", err)
-		}
-
-		// Update shop status to approved and set shop_module_product_id
-		updatedAt := time.Now()
-		_, err = s.writeDB.Exec(
-			`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
-			StatusApproved, childProduct.ID, updatedAt, shopID,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to update shop status: %w", err)
-		}
-
-		// Update activation request status
-		s.writeDB.Exec(
-			`UPDATE shop_activation_requests SET status = ? WHERE id = ?`,
-			StatusApproved, requestID,
-		)
-
-		shop.Status = StatusApproved
-		shop.ShopModuleProductID = childProduct.ID
-		shop.UpdatedAt = updatedAt
-
-		return &ActivateResponse{
-			Shop:                shop,
-			Status:              StatusApproved,
-			Message:             "shop activated successfully",
-			ShopModuleProductID: childProduct.ID,
-		}, nil
-	}
-
-	// 8. Not approved: keep pending, return message
-	message := "shop activation pending approval"
-	if marketStatus.Message != "" {
-		message = marketStatus.Message
-	}
-
 	return &ActivateResponse{
-		Shop:    shop,
-		Status:  StatusPending,
-		Message: message,
+		Shop:                shop,
+		Status:              StatusApproved,
+		Message:             "shop activated successfully",
+		ShopModuleProductID: childProduct.ID,
 	}, nil
 }
 
@@ -386,40 +322,26 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 			return nil
 		}
 
-		// Still pending — retry activation
-		marketStatus, err := s.marketClient.QueryStatus(softwareName, existing.Name)
+		// Still pending — complete activation now (Marketplace already verified eligibility)
+		welcomeMsg := existing.WelcomeMessage
+		if welcomeMsg == "" {
+			welcomeMsg = "欢迎来到 " + existing.Name + " 的客户支持"
+		}
+		childProduct, err := s.findOrCreateProduct(existing.Name, welcomeMsg)
 		if err != nil {
-			log.Printf("[ShopRegister] market retry error for shop %q: %v", existing.Name, err)
-			return fmt.Errorf("market service unavailable: %w", err)
+			return fmt.Errorf("failed to create shop module product: %w", err)
 		}
 
-		if marketStatus.Approved {
-			welcomeMsg := existing.WelcomeMessage
-			if welcomeMsg == "" {
-				welcomeMsg = "欢迎来到 " + existing.Name + " 的客户支持"
-			}
-			childProduct, err := s.productSvc.Create(
-				existing.Name,
-				product.ProductTypeKnowledgeBase,
-				welcomeMsg,
-				welcomeMsg,
-				false,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to create shop module product: %w", err)
-			}
-
-			updatedAt := time.Now()
-			_, err = s.writeDB.Exec(
-				`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
-				StatusApproved, childProduct.ID, updatedAt, existing.ID,
-			)
-			if err != nil {
-				return fmt.Errorf("failed to update shop status: %w", err)
-			}
-			log.Printf("[ShopRegister] retried and approved shop %q (id=%s) for owner %d",
-				existing.Name, existing.ID, ownerID)
+		updatedAt := time.Now()
+		_, err = s.writeDB.Exec(
+			`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
+			StatusApproved, childProduct.ID, updatedAt, existing.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to update shop status: %w", err)
 		}
+		log.Printf("[ShopRegister] activated existing shop %q (id=%s) for owner %d, product=%s",
+			existing.Name, existing.ID, ownerID, childProduct.ID)
 
 		return nil
 	}
@@ -427,11 +349,6 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 	shopID, err := generateID()
 	if err != nil {
 		return fmt.Errorf("failed to generate shop ID: %w", err)
-	}
-
-	requestID, err := generateID()
-	if err != nil {
-		return fmt.Errorf("failed to generate request ID: %w", err)
 	}
 
 	parentProductID := strings.TrimSpace(req.ParentProductID)
@@ -444,72 +361,23 @@ func (s *ShopService) Register(ownerID int64, req RegisterRequest) error {
 
 	storefrontID := req.StorefrontID // 0 if not provided by Marketplace
 
+	// Marketplace already verified eligibility — create shop and activate immediately
+	childProduct, err := s.findOrCreateProduct(storeName, welcomeMsg)
+	if err != nil {
+		return fmt.Errorf("failed to create shop module product: %w", err)
+	}
+
 	_, err = s.writeDB.Exec(
 		`INSERT INTO shops (id, name, owner_id, storefront_id, software_name, description, welcome_message, status, parent_product_id, shop_module_product_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, '', ?, ?)`,
-		shopID, storeName, ownerID, storefrontID, softwareName, welcomeMsg, StatusPending, parentProductID, now, now,
+		 VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
+		shopID, storeName, ownerID, storefrontID, softwareName, welcomeMsg, StatusApproved, parentProductID, childProduct.ID, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create shop record: %w", err)
 	}
 
-	// Insert activation request record
-	_, err = s.writeDB.Exec(
-		`INSERT INTO shop_activation_requests (id, shop_id, software_name, shop_name, market_response, status, created_at)
-		 VALUES (?, ?, ?, ?, '', ?, ?)`,
-		requestID, shopID, softwareName, storeName, StatusPending, now,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create activation request: %w", err)
-	}
-
-	// Query Market service for approval
-	marketStatus, err := s.marketClient.QueryStatus(softwareName, storeName)
-	if err != nil {
-		log.Printf("[ShopRegister] market service error for shop %q: %v", storeName, err)
-		return fmt.Errorf("market service unavailable: %w", err)
-	}
-
-	// Store market response
-	marketRespJSON, _ := json.Marshal(marketStatus)
-	s.writeDB.Exec(
-		`UPDATE shop_activation_requests SET market_response = ? WHERE id = ?`,
-		string(marketRespJSON), requestID,
-	)
-
-	// If approved: create child product and update shop status
-	if marketStatus.Approved {
-		childProduct, err := s.productSvc.Create(
-			storeName,
-			product.ProductTypeKnowledgeBase,
-			welcomeMsg,
-			welcomeMsg,
-			false,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to create shop module product: %w", err)
-		}
-
-		updatedAt := time.Now()
-		_, err = s.writeDB.Exec(
-			`UPDATE shops SET status = ?, shop_module_product_id = ?, updated_at = ? WHERE id = ?`,
-			StatusApproved, childProduct.ID, updatedAt, shopID,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update shop status: %w", err)
-		}
-
-		s.writeDB.Exec(
-			`UPDATE shop_activation_requests SET status = ? WHERE id = ?`,
-			StatusApproved, requestID,
-		)
-
-		log.Printf("[ShopRegister] created and approved shop %q (id=%s) for owner %d, product=%s",
-			storeName, shopID, ownerID, childProduct.ID)
-	} else {
-		log.Printf("[ShopRegister] created shop %q (id=%s) for owner %d, status=pending",
-			storeName, shopID, ownerID)
-	}
+	log.Printf("[ShopRegister] created and activated shop %q (id=%s) for owner %d, storefront_id=%d, product=%s",
+		storeName, shopID, ownerID, storefrontID, childProduct.ID)
 
 	return nil
 }

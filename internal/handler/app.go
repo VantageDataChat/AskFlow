@@ -1178,10 +1178,15 @@ func (a *App) FindOrCreateStoreOwnerAdmin(shopID, shopName, moduleProductID stri
 		`SELECT id FROM admin_users WHERE username = ?`, username,
 	).Scan(&subAdminID)
 	if err == nil {
-		// Existing sub-admin found — update product assignment if moduleProductID is set
+		// Existing sub-admin found — ensure product assignment and permissions are correct
 		if moduleProductID != "" {
 			_ = a.productService.AssignAdminUser(subAdminID, []string{moduleProductID})
 		}
+		// Ensure permissions are set (fix legacy records created with empty permissions)
+		a.db.Exec(
+			`UPDATE admin_users SET permissions = ? WHERE id = ? AND (permissions = '' OR permissions IS NULL)`,
+			"documents,pending,knowledge,faq", subAdminID,
+		)
 		return subAdminID, nil
 	}
 
@@ -1195,9 +1200,12 @@ func (a *App) FindOrCreateStoreOwnerAdmin(shopID, shopName, moduleProductID stri
 		return "", fmt.Errorf("failed to generate sub-admin ID: %w", err)
 	}
 
+	// Store sub-admin permissions: documents, pending questions, knowledge entry, FAQ
+	storePermissions := "documents,pending,knowledge,faq"
+
 	_, err = a.db.Exec(
-		`INSERT INTO admin_users (id, username, password_hash, role, permissions) VALUES (?, ?, ?, 'editor', '')`,
-		subAdminID, username, unusableHash,
+		`INSERT INTO admin_users (id, username, password_hash, role, permissions) VALUES (?, ?, ?, 'editor', ?)`,
+		subAdminID, username, unusableHash, storePermissions,
 	)
 	if err != nil {
 		// Handle race condition: another request may have created it
@@ -1227,8 +1235,17 @@ func (a *App) FindOrCreateStoreOwnerAdmin(shopID, shopName, moduleProductID stri
 }
 
 // ListAdminUsers returns all admin sub-accounts.
-func (a *App) ListAdminUsers() ([]AdminUserInfo, error) {
-	rows, err := a.readDB.Query(`SELECT id, username, role, created_at, COALESCE(permissions,'') FROM admin_users ORDER BY created_at DESC`)
+func (a *App) ListAdminUsers(filterType string) ([]AdminUserInfo, error) {
+	var query string
+	switch filterType {
+	case "store":
+		query = `SELECT id, username, role, created_at, COALESCE(permissions,'') FROM admin_users WHERE username LIKE 'store_%' ORDER BY created_at DESC`
+	case "system":
+		query = `SELECT id, username, role, created_at, COALESCE(permissions,'') FROM admin_users WHERE username NOT LIKE 'store_%' ORDER BY created_at DESC`
+	default:
+		query = `SELECT id, username, role, created_at, COALESCE(permissions,'') FROM admin_users ORDER BY created_at DESC`
+	}
+	rows, err := a.readDB.Query(query)
 	if err != nil {
 		return nil, err
 	}

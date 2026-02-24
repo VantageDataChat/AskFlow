@@ -208,6 +208,22 @@ func (s *ProductService) GetByID(id string) (*Product, error) {
 	p.AllowDownload = allowDL == 1
 	return &p, nil
 }
+// GetByName returns a product by its name, or nil if not found.
+func (s *ProductService) GetByName(name string) (*Product, error) {
+	var p Product
+	var allowDL int
+	err := s.readDB.QueryRow(
+		"SELECT id, name, COALESCE(type, 'service'), description, welcome_message, COALESCE(allow_download, 0), created_at, updated_at FROM products WHERE name = ?", name,
+	).Scan(&p.ID, &p.Name, &p.Type, &p.Description, &p.WelcomeMessage, &allowDL, &p.CreatedAt, &p.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get product by name: %w", err)
+	}
+	p.AllowDownload = allowDL == 1
+	return &p, nil
+}
 
 // List returns all products ordered by created_at.
 func (s *ProductService) List() ([]Product, error) {

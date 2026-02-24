@@ -589,48 +589,52 @@ func HandleTicketExchange(app *App) http.HandlerFunc {
 
 			if foundShop == nil {
 				log.Printf("[TicketExchange] WARNING: no shop found for scope=store, store_id=%d, email=%s", req.StoreID, email)
-				resp["store_error"] = "未找到店铺记录，请先在市场申请开通客户支持"
+				// Clean up the session — store login failed, don't leave a dangling user session
+				_ = app.sessionManager.DeleteSession(sessionID)
+				WriteJSON(w, http.StatusOK, map[string]interface{}{
+					"success":     false,
+					"store_error": "未找到店铺记录，请先在市场申请开通客户支持",
+				})
+				return
 			}
 
-			if foundShop != nil {
-				// Find or create a sub-admin account for the store owner
-				subAdminID, err := app.FindOrCreateStoreOwnerAdmin(
-					foundShop.ID, foundShop.Name, foundShop.ShopModuleProductID,
-				)
-				if err != nil {
-					log.Printf("[TicketExchange] store owner admin error: %v", err)
-					WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-						"success": false, "message": "internal error",
-					})
-					return
-				}
+			// Find or create a sub-admin account for the store owner
+			subAdminID, err := app.FindOrCreateStoreOwnerAdmin(
+				foundShop.ID, foundShop.Name, foundShop.ShopModuleProductID,
+			)
+			if err != nil {
+				log.Printf("[TicketExchange] store owner admin error: %v", err)
+				WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+					"success": false, "message": "internal error",
+				})
+				return
+			}
 
-				// Delete the regular user session and create an admin session
-				_ = app.sessionManager.DeleteSession(sessionID)
-				adminSessionUserID := "admin_" + subAdminID
-				adminSession, err := app.sessionManager.CreateSession(adminSessionUserID)
-				if err != nil {
-					WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
-						"success": false, "message": "internal error",
-					})
-					return
-				}
+			// Delete the regular user session and create an admin session
+			_ = app.sessionManager.DeleteSession(sessionID)
+			adminSessionUserID := "admin_" + subAdminID
+			adminSession, err := app.sessionManager.CreateSession(adminSessionUserID)
+			if err != nil {
+				WriteJSON(w, http.StatusInternalServerError, map[string]interface{}{
+					"success": false, "message": "internal error",
+				})
+				return
+			}
 
-				resp["admin_session"] = adminSession
-				delete(resp, "session") // Remove stale regular session
-				resp["admin_user"] = map[string]string{
-					"username": foundShop.Name,
-					"provider": "admin",
-				}
-				resp["store"] = map[string]interface{}{
-					"store_id":               req.StoreID,
-					"store_name":             foundShop.Name,
-					"welcome_message":        foundShop.WelcomeMessage,
-					"scope":                  "store",
-					"permissions":            []string{"documents", "pending", "knowledge", "faq"},
-					"shop_module_product_id": foundShop.ShopModuleProductID,
-					"parent_product_id":      foundShop.ParentProductID,
-				}
+			resp["admin_session"] = adminSession
+			delete(resp, "session") // Remove stale regular session
+			resp["admin_user"] = map[string]string{
+				"username": foundShop.Name,
+				"provider": "admin",
+			}
+			resp["store"] = map[string]interface{}{
+				"store_id":               req.StoreID,
+				"store_name":             foundShop.Name,
+				"welcome_message":        foundShop.WelcomeMessage,
+				"scope":                  "store",
+				"permissions":            []string{"documents", "pending", "knowledge", "faq"},
+				"shop_module_product_id": foundShop.ShopModuleProductID,
+				"parent_product_id":      foundShop.ParentProductID,
 			}
 		}
 
