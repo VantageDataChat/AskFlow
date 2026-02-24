@@ -33,8 +33,14 @@ type APILLMService struct {
 
 // NewAPILLMService creates a new APILLMService with the given configuration.
 func NewAPILLMService(endpoint, apiKey, modelName string, temperature float64, maxTokens int) *APILLMService {
+	endpointLower := strings.ToLower(endpoint)
+	if endpoint == "" {
+		log.Printf("[WARNING] LLM endpoint is empty — LLM features (including video OCR) will not work until llm.endpoint is configured")
+	} else if !strings.HasPrefix(endpointLower, "http://") && !strings.HasPrefix(endpointLower, "https://") {
+		log.Printf("[WARNING] LLM endpoint %q is missing http:// or https:// prefix — API calls will fail", endpoint)
+	}
 	// Warn if API key is sent over non-HTTPS connection
-	if apiKey != "" && !strings.HasPrefix(strings.ToLower(endpoint), "https://") {
+	if apiKey != "" && endpoint != "" && !strings.HasPrefix(endpointLower, "https://") {
 		log.Printf("[WARNING] LLM API key is being sent over non-HTTPS endpoint: %s", endpoint)
 	}
 	return &APILLMService{
@@ -167,6 +173,14 @@ func (s *APILLMService) callAPIWithRetry(messages []chatMessage) (string, error)
 // callAPI sends the chat completion request to the API and returns the generated text.
 // The third return value indicates whether the error is retryable (network/server errors).
 func (s *APILLMService) callAPI(messages []chatMessage) (string, error, bool) {
+	if s.Endpoint == "" {
+		return "", fmt.Errorf("LLM endpoint is empty — please configure llm.endpoint in config.json (e.g. \"https://api.openai.com/v1\")"), false
+	}
+	endpointLower := strings.ToLower(s.Endpoint)
+	if !strings.HasPrefix(endpointLower, "http://") && !strings.HasPrefix(endpointLower, "https://") {
+		return "", fmt.Errorf("LLM endpoint missing protocol scheme (got %q) — endpoint must start with http:// or https://", s.Endpoint), false
+	}
+
 	reqBody := chatRequest{
 		Model:       s.ModelName,
 		Messages:    messages,

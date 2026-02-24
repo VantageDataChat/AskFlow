@@ -1071,6 +1071,7 @@ func (a *App) UpdateConfig(updates map[string]interface{}) error {
 	ls := llm.NewAPILLMService(cfg.LLM.Endpoint, cfg.LLM.APIKey, cfg.LLM.ModelName, cfg.LLM.Temperature, cfg.LLM.MaxTokens)
 	a.queryEngine.UpdateServices(es, ls, cfg)
 	a.docManager.UpdateEmbeddingService(es)
+	a.docManager.SetLLMService(ls)
 	a.pendingManager.UpdateServices(es, ls)
 
 	// Propagate video config to DocumentManager if any video settings changed
