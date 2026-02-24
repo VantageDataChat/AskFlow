@@ -215,9 +215,15 @@ func HandleProductIntro(app *App) http.HandlerFunc {
 				return
 			}
 			p, err := app.GetProduct(productID)
-			if err == nil && p != nil && p.WelcomeMessage != "" {
-				WriteJSON(w, http.StatusOK, map[string]string{"product_intro": p.WelcomeMessage})
-				return
+			if err == nil && p != nil {
+				intro := p.WelcomeMessage
+				if intro == "" {
+					intro = p.Description
+				}
+				if intro != "" {
+					WriteJSON(w, http.StatusOK, map[string]string{"product_intro": intro})
+					return
+				}
 			}
 		}
 		cfg := app.configManager.Get()

@@ -3963,7 +3963,7 @@
         content.textContent = i18n.t('admin_doc_review_loading');
         adminFetch('/api/login-logs/recent?lines=50')
             .then(function (res) {
-                if (!res.ok) throw new Error(i18n.t('admin_doc_load_failed'));
+                if (!res.ok) throw new Error(i18n.t('admin_login_logs_load_failed'));
                 return res.json();
             })
             .then(function (data) {
@@ -3972,7 +3972,7 @@
                 var rotInput = document.getElementById('cfg-login-log-rotation-mb');
                 if (rotInput) rotInput.value = rotMB;
                 if (lines.length === 0) {
-                    content.innerHTML = '<span style="color:#94a3b8;">暂无登录日志</span>';
+                    content.innerHTML = '<span style="color:#94a3b8;">' + i18n.t('admin_login_logs_empty') + '</span>';
                     return;
                 }
                 var html = '';
@@ -3990,7 +3990,7 @@
                 if (viewer) viewer.scrollTop = viewer.scrollHeight;
             })
             .catch(function (err) {
-                content.textContent = '加载登录日志失败: ' + (err.message || '未知错误');
+                content.textContent = i18n.t('admin_login_logs_load_failed') + ': ' + (err.message || i18n.t('admin_logs_unknown_error'));
             });
     };
 
@@ -4008,18 +4008,18 @@
             body: JSON.stringify({ rotation_mb: val })
         })
         .then(function (res) {
-            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_logs_save_failed')); });
-            showAdminToast(i18n.t('admin_logs_rotation_saved'), 'success');
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_login_logs_save_failed')); });
+            showAdminToast(i18n.t('admin_login_logs_rotation_saved'), 'success');
         })
         .catch(function (err) {
-            showAdminToast(err.message || i18n.t('admin_logs_save_failed'), 'error');
+            showAdminToast(err.message || i18n.t('admin_login_logs_save_failed'), 'error');
         });
     };
 
     window.downloadLoginLogs = function () {
         adminFetch('/api/login-logs/download')
         .then(function (res) {
-            if (!res.ok) throw new Error(i18n.t('admin_logs_download_failed'));
+            if (!res.ok) throw new Error(i18n.t('admin_login_logs_download_failed'));
             return res.blob();
         })
         .then(function (blob) {
@@ -4031,28 +4031,28 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            showAdminToast(i18n.t('admin_logs_download_done'), 'success');
+            showAdminToast(i18n.t('admin_login_logs_download_done'), 'success');
         })
         .catch(function (err) {
-            showAdminToast(err.message || i18n.t('admin_logs_download_failed'), 'error');
+            showAdminToast(err.message || i18n.t('admin_login_logs_download_failed'), 'error');
         });
     };
 
     window.confirmClearLoginLogs = function () {
-        if (!confirm('确定要清空所有登录日志吗？此操作不可恢复。')) {
+        if (!confirm(i18n.t('admin_login_logs_clear_confirm'))) {
             return;
         }
         adminFetch('/api/login-logs/clear', { method: 'DELETE' })
         .then(function (res) {
-            if (!res.ok) throw new Error(i18n.t('admin_logs_clear_failed'));
+            if (!res.ok) throw new Error(i18n.t('admin_login_logs_clear_failed'));
             return res.json();
         })
         .then(function (data) {
-            showAdminToast(i18n.t('admin_logs_clear_done'), 'success');
+            showAdminToast(i18n.t('admin_login_logs_clear_done'), 'success');
             loadRecentLoginLogs();
         })
         .catch(function (err) {
-            showAdminToast(err.message || i18n.t('admin_logs_clear_failed'), 'error');
+            showAdminToast(err.message || i18n.t('admin_login_logs_clear_failed'), 'error');
         });
     };
 

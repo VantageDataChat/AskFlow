@@ -3,6 +3,7 @@ package shop
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -56,7 +57,7 @@ func (c *MarketClient) QueryStatus(softwareName, shopName string) (*ShopStatus, 
 	}
 
 	var status ShopStatus
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&status); err != nil {
 		log.Printf("market client: failed to decode response: %v", err)
 		return nil, fmt.Errorf("market client: failed to decode response: %w", err)
 	}
@@ -89,7 +90,7 @@ func (c *MarketClient) CheckStorefrontSupport(storefrontID int64) (*StorefrontCh
 	}
 
 	var result StorefrontCheckResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
 		log.Printf("market client: failed to decode storefront check response: %v", err)
 		return nil, fmt.Errorf("market client: failed to decode response: %w", err)
 	}

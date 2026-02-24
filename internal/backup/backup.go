@@ -542,18 +542,20 @@ func RestoreDelta(db *sql.DB, deltaPath string) error {
 	}
 
 	// Validate delta SQL: only allow safe DML + transaction control statements
-	// to prevent arbitrary SQL execution (e.g., DROP TABLE, ATTACH DATABASE)
+	// to prevent arbitrary SQL execution (e.g., DROP TABLE, ATTACH DATABASE).
+	//
+	// We scan line-by-line for statement beginnings rather than splitting on ";"
+	// because SQL string values can contain semicolons, causing false splits.
 	content := strings.TrimSpace(string(data))
 	if content == "" {
 		return nil
 	}
-	statements := strings.Split(content, ";")
-	for _, stmt := range statements {
-		trimmed := strings.TrimSpace(stmt)
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		// Skip SQL comments (lines starting with --)
+		// Skip SQL comments
 		if strings.HasPrefix(trimmed, "--") {
 			continue
 		}
@@ -562,9 +564,23 @@ func RestoreDelta(db *sql.DB, deltaPath string) error {
 			!strings.HasPrefix(upper, "UPDATE ") &&
 			!strings.HasPrefix(upper, "DELETE ") &&
 			!strings.HasPrefix(upper, "REPLACE ") &&
-			upper != "BEGIN TRANSACTION" &&
-			upper != "COMMIT" {
+			!strings.HasPrefix(upper, "BEGIN") &&
+			!strings.HasPrefix(upper, "COMMIT") &&
+			// Allow continuation lines (values that start with quotes, parens, etc.)
+			!strings.HasPrefix(trimmed, "'") &&
+			!strings.HasPrefix(trimmed, "(") &&
+			!strings.HasPrefix(trimmed, ")") &&
+			!strings.HasPrefix(trimmed, "X'") {
 			return fmt.Errorf("增量 SQL 包含不允许的语句类型: %s", truncateForLog(trimmed, 50))
+		}
+		// Block dangerous keywords anywhere in the line
+		if strings.Contains(upper, "ATTACH") ||
+			strings.Contains(upper, "DETACH") ||
+			strings.Contains(upper, "DROP ") ||
+			strings.Contains(upper, "ALTER ") ||
+			strings.Contains(upper, "CREATE ") ||
+			strings.Contains(upper, "PRAGMA") {
+			return fmt.Errorf("增量 SQL 包含不允许的关键字: %s", truncateForLog(trimmed, 50))
 		}
 	}
 

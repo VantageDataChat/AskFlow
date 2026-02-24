@@ -13,6 +13,7 @@ import (
 	"askflow/internal/embedding"
 	"askflow/internal/errlog"
 	"askflow/internal/llm"
+	"askflow/internal/loginlog"
 )
 
 // --- System status handler (public) ---
@@ -384,7 +385,9 @@ func HandleLogsDownload(app *App) http.HandlerFunc {
 			return
 		}
 		defer gw.Close()
-		io.Copy(gw, io.LimitReader(f, downloadSize))
+		if _, err := io.Copy(gw, io.LimitReader(f, downloadSize)); err != nil {
+			log.Printf("[LogsDownload] io.Copy error: %v", err)
+		}
 	}
 }
 
@@ -409,6 +412,173 @@ func HandleLogsClear(app *App) http.HandlerFunc {
 		archivesRemoved, err := errlog.ClearLogs()
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, "清空日志失败: "+err.Error())
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"status":           "ok",
+			"archives_removed": archivesRemoved,
+		})
+	}
+}
+
+// --- Login Log handlers (super_admin only) ---
+
+// HandleLoginLogsRecent returns the most recent login log lines.
+// GET /api/login-logs/recent?lines=50
+func HandleLoginLogsRecent(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		_, role, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+		if role != "super_admin" {
+			WriteError(w, http.StatusForbidden, "无权限")
+			return
+		}
+		n := 50
+		if v := r.URL.Query().Get("lines"); v != "" {
+			if parsed, err := strconv.Atoi(v); err == nil && parsed >= 1 {
+				n = parsed
+			}
+			if n > 500 {
+				n = 500
+			}
+		}
+		lines, err := loginlog.RecentLines(n)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "读取登录日志失败: "+err.Error())
+			return
+		}
+		if lines == nil {
+			lines = []string{}
+		}
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"lines":       lines,
+			"rotation_mb": loginlog.GetRotationSizeMB(),
+		})
+	}
+}
+
+// HandleLoginLogsRotation gets or sets the login log rotation size.
+// GET  /api/login-logs/rotation
+// PUT  /api/login-logs/rotation { "rotation_mb": 200 }
+func HandleLoginLogsRotation(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		_, role, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+		if role != "super_admin" {
+			WriteError(w, http.StatusForbidden, "无权限")
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			WriteJSON(w, http.StatusOK, map[string]int{"rotation_mb": loginlog.GetRotationSizeMB()})
+		case http.MethodPut:
+			var req struct {
+				RotationMB int `json:"rotation_mb"`
+			}
+			if err := ReadJSONBody(r, &req); err != nil {
+				WriteError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			if req.RotationMB < 1 || req.RotationMB > 10240 {
+				WriteError(w, http.StatusBadRequest, "rotation_mb 必须在 1-10240 之间")
+				return
+			}
+			loginlog.SetRotationSizeMB(req.RotationMB)
+			WriteJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "rotation_mb": req.RotationMB})
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
+}
+
+// HandleLoginLogsDownload streams the current userlogin.log as a gzip download.
+// GET /api/login-logs/download
+func HandleLoginLogsDownload(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		_, role, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+		if role != "super_admin" {
+			WriteError(w, http.StatusForbidden, "无权限")
+			return
+		}
+		logPath := loginlog.GetLogPath()
+		f, err := os.Open(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				WriteError(w, http.StatusNotFound, "登录日志文件不存在")
+				return
+			}
+			WriteError(w, http.StatusInternalServerError, "打开登录日志文件失败")
+			return
+		}
+		defer f.Close()
+
+		info, err := f.Stat()
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "读取登录日志文件信息失败")
+			return
+		}
+		maxDownloadSize := int64(512 * 1024 * 1024)
+		downloadSize := info.Size()
+		if downloadSize > maxDownloadSize {
+			downloadSize = maxDownloadSize
+		}
+
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", "attachment; filename=userlogin_log.gz")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		gw, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "压缩初始化失败")
+			return
+		}
+		defer gw.Close()
+		if _, err := io.Copy(gw, io.LimitReader(f, downloadSize)); err != nil {
+			log.Printf("[LoginLogsDownload] io.Copy error: %v", err)
+		}
+	}
+}
+
+// HandleLoginLogsClear clears all login log files (current and archived).
+// DELETE /api/login-logs/clear
+func HandleLoginLogsClear(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		_, role, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+		if role != "super_admin" {
+			WriteError(w, http.StatusForbidden, "无权限")
+			return
+		}
+
+		archivesRemoved, err := loginlog.ClearLogs()
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "清空登录日志失败: "+err.Error())
 			return
 		}
 

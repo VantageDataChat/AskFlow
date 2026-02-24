@@ -26,6 +26,7 @@ import (
 	"askflow/internal/embedding"
 	"askflow/internal/errlog"
 	"askflow/internal/faq"
+	"askflow/internal/loginlog"
 	"askflow/internal/llm"
 	"askflow/internal/pending"
 	"askflow/internal/product"
@@ -418,10 +419,12 @@ func (a *App) AdminLogin(username, password, ip string) (*AdminLoginResponse, er
 		if err := auth.VerifyAdminPassword(password, cfg.Admin.PasswordHash); err != nil {
 			a.loginLimiter.RecordAttempt(username, ip, false)
 			log.Printf("[Auth] failed admin login attempt: username=%q ip=%s", username, ip)
+			loginlog.Log(loginlog.EventLoginFailed, username, ip, "role=super_admin reason=wrong_password")
 			return nil, fmt.Errorf("用户名或密码错误")
 		}
 		a.loginLimiter.RecordAttempt(username, ip, true)
 		log.Printf("[Auth] successful admin login: username=%q ip=%s", username, ip)
+		loginlog.Log(loginlog.EventLogin, username, ip, "role=super_admin")
 		if err := a.ensureAdminUser(); err != nil {
 			return nil, err
 		}
@@ -442,15 +445,18 @@ func (a *App) AdminLogin(username, password, ip string) (*AdminLoginResponse, er
 	if err != nil {
 		a.loginLimiter.RecordAttempt(username, ip, false)
 		log.Printf("[Auth] failed sub-admin login attempt: username=%q ip=%s (user not found)", username, ip)
+		loginlog.Log(loginlog.EventLoginFailed, username, ip, "reason=user_not_found")
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 	if err := auth.VerifyAdminPassword(password, passwordHash); err != nil {
 		a.loginLimiter.RecordAttempt(username, ip, false)
 		log.Printf("[Auth] failed sub-admin login attempt: username=%q ip=%s (wrong password)", username, ip)
+		loginlog.Log(loginlog.EventLoginFailed, username, ip, fmt.Sprintf("role=%s reason=wrong_password", role))
 		return nil, fmt.Errorf("用户名或密码错误")
 	}
 	a.loginLimiter.RecordAttempt(username, ip, true)
 	log.Printf("[Auth] successful sub-admin login: username=%q ip=%s role=%s", username, ip, role)
+	loginlog.Log(loginlog.EventLogin, username, ip, fmt.Sprintf("role=%s", role))
 
 	// Ensure user record exists for FK
 	a.db.Exec(

@@ -27,6 +27,7 @@ import (
 	"askflow/internal/handler"
 	"askflow/internal/shop"
 	"askflow/internal/llm"
+	"askflow/internal/loginlog"
 	"askflow/internal/parser"
 	"askflow/internal/pending"
 	"askflow/internal/product"
@@ -64,6 +65,11 @@ func (as *AppService) Initialize(dataDir string, overrideBind string, overridePo
 	// 0. Initialize error logger (/var/log/askflow/error.log)
 	if err := errlog.Init(); err != nil {
 		log.Printf("Warning: error logger init failed: %v (errors will not be persisted to file)", err)
+	}
+
+	// 0.1 Initialize login audit logger (/var/askflow/userlogin.log)
+	if err := loginlog.Init(); err != nil {
+		log.Printf("Warning: login logger init failed: %v (login events will not be persisted to file)", err)
 	}
 
 	// 0.5 Check CJK fonts (Linux: auto-install if root, otherwise warn)
@@ -296,6 +302,7 @@ func (as *AppService) Shutdown(timeout time.Duration) error {
 
 	log.Println("Server stopped")
 	errlog.Close()
+	loginlog.Close()
 	return nil
 }
 

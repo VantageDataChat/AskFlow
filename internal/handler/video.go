@@ -175,6 +175,21 @@ func HandleVideoAutoSetup(app *App) http.HandlerFunc {
 			return
 		}
 
+		// Validate password doesn't contain control characters that could be
+		// used for injection when piped to sudo via stdin
+		if !isRoot && sudoPassword != "" {
+			for _, c := range sudoPassword {
+				if c < 0x20 && c != '\t' {
+					WriteError(w, http.StatusBadRequest, "密码包含非法控制字符")
+					return
+				}
+			}
+			if len(sudoPassword) > 256 {
+				WriteError(w, http.StatusBadRequest, "密码过长")
+				return
+			}
+		}
+
 		// If not root, verify the sudo password before starting the long setup
 		if !isRoot && sudoPassword != "" {
 			if err := verifySudoPassword(sudoPassword); err != nil {
