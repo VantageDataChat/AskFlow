@@ -32,19 +32,19 @@ func TestResolveProductID_NonShopOwner_EmptyProductID(t *testing.T) {
 	}
 }
 
-func TestResolveProductID_ShopOwner_ForcesShopProductID(t *testing.T) {
+func TestResolveProductID_ShopOwner_PublicDocForbidden(t *testing.T) {
 	shopPID := "shop_product_abc"
 	r := httptest.NewRequest(http.MethodGet, "/test", nil)
 	ctx := middleware.WithShopOwnerContext(r.Context(), shopPID)
 	r = r.WithContext(ctx)
 
-	// Empty requested product_id → forced to shop's product_id.
-	pid, err := resolveProductID(r, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Empty requested product_id (public document) → forbidden for shop owners.
+	_, err := resolveProductID(r, "")
+	if err == nil {
+		t.Fatal("expected error for shop owner accessing public document, got nil")
 	}
-	if pid != shopPID {
-		t.Fatalf("expected %s, got %s", shopPID, pid)
+	if err.Error() != "权限不足" {
+		t.Fatalf("expected '权限不足', got %q", err.Error())
 	}
 }
 
@@ -91,17 +91,17 @@ func TestProperty9_ShopOwnerOperationsLimitedToOwnModule(t *testing.T) {
 		ctx := middleware.WithShopOwnerContext(r.Context(), shopModuleProductID)
 		r = r.WithContext(ctx)
 
-		// Sub-property A: empty requested product_id → forced to shop's product_id.
-		pid, err := resolveProductID(r, "")
-		if err != nil {
-			t.Fatalf("unexpected error for empty product_id: %v", err)
+		// Sub-property A: empty requested product_id (public doc) → forbidden for shop owners.
+		_, err := resolveProductID(r, "")
+		if err == nil {
+			t.Fatalf("expected error for shop owner accessing public document (empty product_id)")
 		}
-		if pid != shopModuleProductID {
-			t.Fatalf("expected %s, got %s", shopModuleProductID, pid)
+		if err.Error() != "权限不足" {
+			t.Fatalf("expected '权限不足', got %q", err.Error())
 		}
 
 		// Sub-property B: matching requested product_id → allowed, returns shop's product_id.
-		pid, err = resolveProductID(r, shopModuleProductID)
+		pid, err := resolveProductID(r, shopModuleProductID)
 		if err != nil {
 			t.Fatalf("unexpected error for matching product_id: %v", err)
 		}
@@ -150,3 +150,62 @@ func TestProperty10_CrossShopAccessDenied(t *testing.T) {
 	})
 }
 
+
+// --- resolveShopListProductID tests ---
+
+func TestResolveShopListProductID_NonShopOwner_PassThrough(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	pid, err := resolveShopListProductID(r, "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid != "abc123" {
+		t.Fatalf("expected abc123, got %s", pid)
+	}
+}
+
+func TestResolveShopListProductID_ShopOwner_EmptyFillsShopID(t *testing.T) {
+	shopPID := "shop_product_abc"
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	ctx := middleware.WithShopOwnerContext(r.Context(), shopPID)
+	r = r.WithContext(ctx)
+
+	// Empty product_id → auto-filled with shop's product_id (list semantics).
+	pid, err := resolveShopListProductID(r, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid != shopPID {
+		t.Fatalf("expected %s, got %s", shopPID, pid)
+	}
+}
+
+func TestResolveShopListProductID_ShopOwner_MatchOK(t *testing.T) {
+	shopPID := "shop_product_abc"
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	ctx := middleware.WithShopOwnerContext(r.Context(), shopPID)
+	r = r.WithContext(ctx)
+
+	pid, err := resolveShopListProductID(r, shopPID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pid != shopPID {
+		t.Fatalf("expected %s, got %s", shopPID, pid)
+	}
+}
+
+func TestResolveShopListProductID_ShopOwner_CrossShopDenied(t *testing.T) {
+	shopPID := "shop_product_abc"
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	ctx := middleware.WithShopOwnerContext(r.Context(), shopPID)
+	r = r.WithContext(ctx)
+
+	_, err := resolveShopListProductID(r, "other_product_xyz")
+	if err == nil {
+		t.Fatal("expected error for cross-shop access, got nil")
+	}
+	if err.Error() != "权限不足" {
+		t.Fatalf("expected '权限不足', got %q", err.Error())
+	}
+}

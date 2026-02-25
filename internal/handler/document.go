@@ -50,10 +50,12 @@ func HandleDocuments(app *App) http.HandlerFunc {
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
 		isShopOwner := middleware.IsShopOwner(r.Context())
-		productID, err = resolveProductID(r, productID)
-		if err != nil {
-			WriteError(w, http.StatusForbidden, err.Error())
-			return
+		if isShopOwner {
+			productID, err = resolveShopListProductID(r, productID)
+			if err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		// Shop owners should only see their own documents, not public ones.
 		includePublic := !isShopOwner
@@ -349,6 +351,18 @@ func HandleDocumentByID(app *App) http.HandlerFunc {
 				WriteAdminSessionError(w, err)
 				return
 			}
+			// Shop owner isolation: verify document belongs to the shop's product.
+			if middleware.IsShopOwner(r.Context()) {
+				docInfo, dErr := app.GetDocumentInfo(docID)
+				if dErr != nil {
+					WriteError(w, http.StatusNotFound, "文件未找到")
+					return
+				}
+				if _, err := resolveProductID(r, docInfo.ProductID); err != nil {
+					WriteError(w, http.StatusForbidden, err.Error())
+					return
+				}
+			}
 			filePath, fileName, err := app.docManager.GetFilePath(docID)
 			if err != nil {
 				WriteError(w, http.StatusNotFound, "文件未找到")
@@ -395,6 +409,18 @@ func HandleDocumentByID(app *App) http.HandlerFunc {
 			if err != nil {
 				WriteAdminSessionError(w, err)
 				return
+			}
+			// Shop owner isolation: verify document belongs to the shop's product.
+			if middleware.IsShopOwner(r.Context()) {
+				docInfo, dErr := app.GetDocumentInfo(docID)
+				if dErr != nil {
+					WriteError(w, http.StatusNotFound, "文档未找到")
+					return
+				}
+				if _, err := resolveProductID(r, docInfo.ProductID); err != nil {
+					WriteError(w, http.StatusForbidden, err.Error())
+					return
+				}
 			}
 			review, err := app.GetDocumentReview(docID)
 			if err != nil {

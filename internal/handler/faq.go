@@ -29,7 +29,7 @@ func HandleFAQ(app *App) http.HandlerFunc {
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
 		if middleware.IsShopOwner(r.Context()) {
-			pid, err := resolveProductID(r, productID)
+			pid, err := resolveShopListProductID(r, productID)
 			if err != nil {
 				WriteError(w, http.StatusForbidden, err.Error())
 				return
@@ -77,7 +77,7 @@ func HandleFAQAdminList(app *App) http.HandlerFunc {
 				return
 			}
 			// Shop owner isolation: force product_id to shop's module product ID.
-			productID, err = resolveProductID(r, productID)
+			productID, err = resolveShopListProductID(r, productID)
 			if err != nil {
 				WriteError(w, http.StatusForbidden, err.Error())
 				return
@@ -155,6 +155,24 @@ func HandleFAQAdminReorder(app *App) http.HandlerFunc {
 		if err := ReadJSONBody(r, &req); err != nil {
 			WriteError(w, http.StatusBadRequest, "invalid request body")
 			return
+		}
+		// Shop owner isolation: verify all FAQ entries belong to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			for _, id := range req.IDs {
+				if !IsValidHexID(id) {
+					WriteError(w, http.StatusBadRequest, "invalid FAQ ID")
+					return
+				}
+				faqProductID, fErr := app.GetFAQProductID(id)
+				if fErr != nil {
+					WriteError(w, http.StatusNotFound, "FAQ not found")
+					return
+				}
+				if _, err := resolveProductID(r, faqProductID); err != nil {
+					WriteError(w, http.StatusForbidden, err.Error())
+					return
+				}
+			}
 		}
 		if err := app.ReorderFAQ(req.IDs); err != nil {
 			WriteError(w, http.StatusInternalServerError, "排序失败")

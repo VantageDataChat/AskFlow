@@ -14,10 +14,33 @@ import (
 // resolveProductID returns the effective product_id for the request.
 // For shop owners, it enforces their shop_module_product_id:
 //   - If the request includes a product_id that differs from the shop's, returns a 403 error.
+//   - Public documents (product_id="") are not accessible to shop owners.
 //   - Otherwise, forces the product_id to the shop's shop_module_product_id.
 //
 // For non-shop users (admins, regular users), the requestedProductID is returned as-is.
 func resolveProductID(r *http.Request, requestedProductID string) (string, error) {
+	if !middleware.IsShopOwner(r.Context()) {
+		return requestedProductID, nil
+	}
+	shopProductID, ok := middleware.GetShopModuleProductID(r.Context())
+	if !ok {
+		return "", fmt.Errorf("权限不足")
+	}
+	// Shop owners cannot access public documents (empty product_id).
+	if requestedProductID == "" {
+		return "", fmt.Errorf("权限不足")
+	}
+	if requestedProductID != shopProductID {
+		return "", fmt.Errorf("权限不足")
+	}
+	return shopProductID, nil
+}
+
+// resolveShopListProductID resolves the product_id for list/query endpoints.
+// Unlike resolveProductID, an empty requestedProductID is treated as "unspecified"
+// and automatically filled with the shop's product ID (instead of being rejected).
+// For non-shop users, the requestedProductID is returned as-is.
+func resolveShopListProductID(r *http.Request, requestedProductID string) (string, error) {
 	if !middleware.IsShopOwner(r.Context()) {
 		return requestedProductID, nil
 	}

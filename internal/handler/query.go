@@ -51,7 +51,7 @@ func HandleQuery(app *App) http.HandlerFunc {
 			}
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
-		if pid, err := resolveProductID(r, req.ProductID); err != nil {
+		if pid, err := resolveShopListProductID(r, req.ProductID); err != nil {
 			WriteError(w, http.StatusForbidden, err.Error())
 			return
 		} else {

@@ -36,8 +36,8 @@
     var _productFetchMode = null;
     function fetchProducts(mode) {
         mode = mode || 'default';
-        // If cache exists for a different mode, invalidate it
-        if (cachedProducts && _productFetchMode !== mode) {
+        // If a different mode is requested, invalidate both cache and in-flight promise
+        if (_productFetchMode !== null && _productFetchMode !== mode) {
             cachedProducts = null;
             _productFetchPromise = null;
         }
@@ -4725,7 +4725,11 @@
                     showToast(data.store_error, 'error');
                 }
 
-                fetchProducts();
+                // Do NOT call fetchProducts() here — initChat() will call
+                // resolveInitialProduct → loadChatProducts with the correct
+                // mode (e.g. 'shop:xxx' for market customers). A premature
+                // fetchProducts() with default mode poisons the cache and
+                // causes the shop product to be excluded from the selector.
                 window.history.replaceState({}, '', '/chat');
                 handleRoute();
                 return;

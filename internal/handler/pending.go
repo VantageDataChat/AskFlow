@@ -36,10 +36,12 @@ func HandlePending(app *App) http.HandlerFunc {
 			return
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
-		productID, err = resolveProductID(r, productID)
-		if err != nil {
-			WriteError(w, http.StatusForbidden, err.Error())
-			return
+		if middleware.IsShopOwner(r.Context()) {
+			productID, err = resolveShopListProductID(r, productID)
+			if err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		questions, err := app.ListPendingQuestions(status, productID)
 		if err != nil {
@@ -130,11 +132,12 @@ func HandlePendingCreate(app *App) http.HandlerFunc {
 			return
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
-		if pid, err := resolveProductID(r, req.ProductID); err != nil {
-			WriteError(w, http.StatusForbidden, err.Error())
-			return
-		} else {
-			req.ProductID = pid
+		if middleware.IsShopOwner(r.Context()) {
+			req.ProductID, err = resolveShopListProductID(r, req.ProductID)
+			if err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
 		}
 		pq, err := app.CreatePendingQuestion(req.Question, authenticatedUserID, req.ImageData, req.ProductID)
 		if err != nil {
