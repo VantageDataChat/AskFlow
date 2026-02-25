@@ -108,6 +108,9 @@ func (ec *embeddingCache) get(text string) ([]float64, bool) {
 	if !ok || time.Since(entry.timestamp) > ec.ttl {
 		if ok {
 			delete(ec.entries, text)
+			// Note: count is not decremented here because the ring buffer
+			// slot is still occupied by the stale key. The slot will be
+			// reclaimed naturally when the ring head wraps around to it.
 		}
 		return nil, false
 	}

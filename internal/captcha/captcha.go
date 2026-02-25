@@ -88,7 +88,9 @@ func Generate() *Response {
 	img := renderCaptcha(expr + "= ?")
 
 	var buf bytes.Buffer
-	png.Encode(&buf, img)
+	if err := png.Encode(&buf, img); err != nil {
+		return nil
+	}
 	b64 := base64.StdEncoding.EncodeToString(buf.Bytes())
 
 	return &Response{
