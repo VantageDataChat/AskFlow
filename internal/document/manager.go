@@ -687,15 +687,22 @@ func (dm *DocumentManager) DeleteDocument(docID string) error {
 }
 
 // ListDocuments returns all documents ordered by creation time descending.
-func (dm *DocumentManager) ListDocuments(productID string) ([]DocumentInfo, error) {
+func (dm *DocumentManager) ListDocuments(productID string, includePublic bool) ([]DocumentInfo, error) {
 	var rows *sql.Rows
 	var err error
 
 	if productID != "" {
-		rows, err = dm.db.Query(
-			`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE product_id = ? OR product_id = '' ORDER BY created_at DESC`,
-			productID,
-		)
+		if includePublic {
+			rows, err = dm.db.Query(
+				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE product_id = ? OR product_id = '' ORDER BY created_at DESC`,
+				productID,
+			)
+		} else {
+			rows, err = dm.db.Query(
+				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE product_id = ? ORDER BY created_at DESC`,
+				productID,
+			)
+		}
 	} else {
 		rows, err = dm.db.Query(`SELECT id, name, type, status, error, created_at, product_id FROM documents ORDER BY created_at DESC`)
 	}
@@ -725,6 +732,7 @@ func (dm *DocumentManager) ListDocuments(productID string) ([]DocumentInfo, erro
 	}
 	return docs, nil
 }
+
 
 
 // processFile parses a file, chunks the text, embeds, and stores vectors.

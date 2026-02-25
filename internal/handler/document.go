@@ -49,12 +49,15 @@ func HandleDocuments(app *App) http.HandlerFunc {
 			return
 		}
 		// Shop owner isolation: force product_id to shop's module product ID.
+		isShopOwner := middleware.IsShopOwner(r.Context())
 		productID, err = resolveProductID(r, productID)
 		if err != nil {
 			WriteError(w, http.StatusForbidden, err.Error())
 			return
 		}
-		docs, err := app.ListDocuments(productID)
+		// Shop owners should only see their own documents, not public ones.
+		includePublic := !isShopOwner
+		docs, err := app.ListDocuments(productID, includePublic)
 		if err != nil {
 			log.Printf("[Documents] list error: %v", err)
 			WriteError(w, http.StatusInternalServerError, "获取文档列表失败")

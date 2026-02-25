@@ -127,9 +127,10 @@ func (a *App) PreviewURL(url string) (*document.URLPreviewResult, error) {
 }
 
 // ListDocuments returns uploaded documents, optionally filtered by product ID.
-func (a *App) ListDocuments(productID string) ([]document.DocumentInfo, error) {
-	return a.docManager.ListDocuments(productID)
+func (a *App) ListDocuments(productID string, includePublic bool) ([]document.DocumentInfo, error) {
+	return a.docManager.ListDocuments(productID, includePublic)
 }
+
 
 // DeleteDocument removes a document and its associated vectors.
 func (a *App) DeleteDocument(docID string) error {
