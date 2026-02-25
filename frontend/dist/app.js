@@ -1348,6 +1348,7 @@
         }
         container.innerHTML = html;
         scrollChatToBottom();
+        if (typeof updateFAQButtonStates === 'function') updateFAQButtonStates();
     }
 
     function renderSingleMessage(msg, isLast, i) {
@@ -6000,8 +6001,10 @@
             return;
         }
         var html = '';
+        var disabledAttr = chatLoading ? ' disabled' : '';
+        var disabledClass = chatLoading ? ' faq-item-disabled' : '';
         for (var i = 0; i < faqs.length; i++) {
-            html += '<button class="faq-item" onclick="askFAQ(this)" data-question="' + escapeHtml(faqs[i].question) + '">' +
+            html += '<button class="faq-item' + disabledClass + '"' + disabledAttr + ' onclick="askFAQ(this)" data-question="' + escapeHtml(faqs[i].question) + '">' +
                 '<span class="faq-item-num">' + (i + 1) + '</span>' +
                 '<span class="faq-item-text">' + escapeHtml(faqs[i].question) + '</span>' +
             '</button>';
@@ -6009,7 +6012,21 @@
         container.innerHTML = html;
     }
 
+    function updateFAQButtonStates() {
+        var buttons = document.querySelectorAll('#faq-panel-list .faq-item');
+        for (var i = 0; i < buttons.length; i++) {
+            if (chatLoading) {
+                buttons[i].disabled = true;
+                buttons[i].classList.add('faq-item-disabled');
+            } else {
+                buttons[i].disabled = false;
+                buttons[i].classList.remove('faq-item-disabled');
+            }
+        }
+    }
+
     window.askFAQ = function (el) {
+        if (chatLoading) return;
         var question = el.getAttribute('data-question');
         if (!question) return;
         var panel = document.getElementById('faq-panel');

@@ -3474,6 +3474,15 @@ a.chat-source-download:hover {
     color: #1E40AF;
     transform: translateX(2px);
 }
+.faq-item-disabled,
+.faq-item-disabled:hover {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    background: #F3F4F6;
+    border-color: transparent;
+    color: #9CA3AF;
+}
 .faq-item-num {
     flex-shrink: 0;
     width: 22px;
