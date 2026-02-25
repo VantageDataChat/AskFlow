@@ -136,6 +136,10 @@
             'chat_debug_toggle': '调试信息',
             'chat_source_unknown': '未知文档',
             'chat_source_image': '📷 图片来源',
+            'chat_source_admin_answer': '管理员回答',
+            'chat_source_question_prefix': '问题',
+            'chat_source_answer_prefix': '回答',
+            'chat_source_image_answer': '图片回答',
             'chat_source_download': '点击下载文档',
             'chat_media_seek_hint': '点击跳转到该时间点',
             'chat_play_audio': '播放音频',
@@ -346,7 +350,7 @@
             'admin_settings_product_intro': '产品介绍',
             'admin_settings_product_intro_label': '欢迎信息',
             'admin_settings_product_intro_placeholder': '输入产品简介，用户登录后将作为欢迎信息显示',
-            'admin_settings_product_intro_hint': '用户登录后在聊天页面显示此信息',
+            'admin_settings_product_intro_hint': '用户登录后在聊天页面显示此信息，支持 Markdown 语法（如 [链接文字](https://example.com)、**加粗**、*斜体*）',
             'admin_settings_product_name': '产品名称',
             'admin_settings_product_name_label': '产品名称',
             'admin_settings_product_name_placeholder': '输入产品名称，如：XX自助服务系统',
@@ -526,12 +530,13 @@
             'admin_products_desc': '产品描述',
             'admin_products_desc_placeholder': '输入产品描述（可选）',
             'admin_products_welcome': '欢迎消息',
-            'admin_products_welcome_placeholder': '用户选择该产品后显示的欢迎消息（可选）',
+            'admin_products_welcome_placeholder': '用户选择该产品后显示的欢迎消息（可选），支持 Markdown 语法',
             'admin_products_allow_download': '允许下载参考文件',
             'admin_products_allow_download_hint': '启用后，用户可在聊天中下载 PDF/Word/Excel/PPT/视频 等参考文件',
             'admin_products_add_btn': '添加产品',
             'admin_products_list_legend': '产品列表',
             'admin_products_th_name': '名称',
+            'admin_products_th_default': '默认',
             'admin_products_th_id': '产品ID',
             'admin_products_th_type': '类型',
             'admin_products_th_desc': '描述',
@@ -551,6 +556,7 @@
             'admin_products_name_required': '请输入产品名称',
             'admin_products_created': '产品创建成功',
             'admin_products_create_failed': '创建失败',
+            'admin_products_default_set': '已设为默认产品',
             'admin_products_load_failed': '加载产品列表失败',
 
             // Shop management
@@ -693,6 +699,17 @@
 
             // Admin - FAQ management
             'admin_nav_faq': 'FAQ管理',
+
+            // Admin - Store Settings
+            'admin_nav_store_settings': '店铺设置',
+            'admin_store_settings_title': '店铺设置',
+            'admin_store_settings_welcome_legend': '欢迎消息设置',
+            'admin_store_settings_welcome_hint': '设置客户进入聊天时显示的欢迎消息，支持 Markdown 语法。',
+            'admin_store_settings_edit_label': '编辑',
+            'admin_store_settings_preview_label': '预览',
+            'admin_store_settings_welcome_placeholder': '输入欢迎消息，支持 Markdown...',
+            'admin_store_settings_save_btn': '保存',
+            'admin_store_settings_saved': '欢迎消息已保存',
             'admin_faq_title': 'FAQ管理',
             'admin_faq_product_label': '选择产品：',
             'admin_faq_add_legend': '添加FAQ',
@@ -715,6 +732,13 @@
             'admin_faq_select_product': '请选择产品并输入问题',
             'admin_faq_order_saved': '排序已保存',
             'admin_faq_order_fail': '排序失败',
+
+            // About dialog
+            'about_title': '问渠',
+            'about_poem_line1': '问渠那得清如许？',
+            'about_poem_line2': '为有源头活水来。',
+            'about_poet': '—— 朱熹《观书有感》',
+            'about_author': '作者：Dr. Daniel',
 
             // Language
             'lang_switch': 'EN'
@@ -848,6 +872,10 @@
             'chat_debug_toggle': 'Debug Info',
             'chat_source_unknown': 'Unknown document',
             'chat_source_image': '📷 Image source',
+            'chat_source_admin_answer': 'Admin Answer',
+            'chat_source_question_prefix': 'Q',
+            'chat_source_answer_prefix': 'A',
+            'chat_source_image_answer': 'Image Answer',
             'chat_source_download': 'Click to download document',
             'chat_media_seek_hint': 'Click to seek to this time',
             'chat_play_audio': 'Play audio',
@@ -1058,7 +1086,7 @@
             'admin_settings_product_intro': 'Product Introduction',
             'admin_settings_product_intro_label': 'Welcome Message',
             'admin_settings_product_intro_placeholder': 'Enter product intro, shown as welcome message after login',
-            'admin_settings_product_intro_hint': 'Displayed on chat page after user login',
+            'admin_settings_product_intro_hint': 'Displayed on chat page after user login. Supports Markdown (e.g. [link text](https://example.com), **bold**, *italic*)',
             'admin_settings_product_name': 'Product Name',
             'admin_settings_product_name_label': 'Product Name',
             'admin_settings_product_name_placeholder': 'Enter product name, e.g.: XX Self-Service System',
@@ -1238,12 +1266,13 @@
             'admin_products_desc': 'Description',
             'admin_products_desc_placeholder': 'Enter product description (optional)',
             'admin_products_welcome': 'Welcome Message',
-            'admin_products_welcome_placeholder': 'Welcome message shown when user selects this product (optional)',
+            'admin_products_welcome_placeholder': 'Welcome message shown when user selects this product (optional). Supports Markdown',
             'admin_products_allow_download': 'Allow document download',
             'admin_products_allow_download_hint': 'When enabled, users can download PDF/Word/Excel/PPT/Video source documents from chat',
             'admin_products_add_btn': 'Add Product',
             'admin_products_list_legend': 'Product List',
             'admin_products_th_name': 'Name',
+            'admin_products_th_default': 'Default',
             'admin_products_th_id': 'Product ID',
             'admin_products_th_type': 'Type',
             'admin_products_th_desc': 'Description',
@@ -1263,6 +1292,7 @@
             'admin_products_name_required': 'Please enter a product name',
             'admin_products_created': 'Product created successfully',
             'admin_products_create_failed': 'Creation failed',
+            'admin_products_default_set': 'Default product set',
             'admin_products_load_failed': 'Failed to load products',
 
             // Shop management
@@ -1405,6 +1435,17 @@
 
             // Admin - FAQ management
             'admin_nav_faq': 'FAQ Management',
+
+            // Admin - Store Settings
+            'admin_nav_store_settings': 'Store Settings',
+            'admin_store_settings_title': 'Store Settings',
+            'admin_store_settings_welcome_legend': 'Welcome Message',
+            'admin_store_settings_welcome_hint': 'Set the welcome message displayed when customers enter the chat. Markdown syntax is supported.',
+            'admin_store_settings_edit_label': 'Edit',
+            'admin_store_settings_preview_label': 'Preview',
+            'admin_store_settings_welcome_placeholder': 'Enter welcome message, Markdown supported...',
+            'admin_store_settings_save_btn': 'Save',
+            'admin_store_settings_saved': 'Welcome message saved',
             'admin_faq_title': 'FAQ Management',
             'admin_faq_product_label': 'Product:',
             'admin_faq_add_legend': 'Add FAQ',
@@ -1427,6 +1468,13 @@
             'admin_faq_select_product': 'Please select a product and enter a question',
             'admin_faq_order_saved': 'Order saved',
             'admin_faq_order_fail': 'Reorder failed',
+
+            // About dialog
+            'about_title': 'AskFlow',
+            'about_poem_line1': 'How can the water be so clear?',
+            'about_poem_line2': 'For fresh water comes from the source.',
+            'about_poet': '— Zhu Xi, "Erta Reflections on Reading"',
+            'about_author': 'Author: Dr. Daniel',
 
             // Language
             'lang_switch': '中文'

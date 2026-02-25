@@ -11,6 +11,8 @@
     var ADMIN_USER_KEY = 'askflow_admin_user';
     var adminLoginRoute = '/admin'; // default, will be fetched from server
     var systemReady = true; // assume ready until checked
+    var anonymousFrontendEnabled = false; // cached from /api/admin/status
+    var systemDefaultProductID = ''; // cached from /api/admin/status
     var loginCaptchaId = '';
     var registerCaptchaId = '';
     var adminCaptchaId = '';
@@ -94,6 +96,18 @@
         }
     }
 
+    // Apply cached anonymous frontend button state to the login page
+    function applyAnonFrontendBtn() {
+        var btn = document.getElementById('anonymous-frontend-login-btn');
+        if (btn) {
+            if (anonymousFrontendEnabled) {
+                btn.classList.remove('hidden');
+            } else {
+                btn.classList.add('hidden');
+            }
+        }
+    }
+
     function handleRoute() {
         var route = getRoute();
         var session = getSession();
@@ -137,6 +151,7 @@
             } else {
                 showPage('login');
                 loadLoginCaptcha();
+                applyAnonFrontendBtn();
                 // Show error detail from ticket-login failure (if present in URL)
                 var loginParams = new URLSearchParams(window.location.search);
                 var loginError = loginParams.get('error');
@@ -164,6 +179,7 @@
             if (!session) {
                 showPage('login');
                 loadLoginCaptcha();
+                applyAnonFrontendBtn();
             } else {
                 showPage('chat');
                 initChat();
@@ -172,6 +188,7 @@
             if (!session) {
                 showPage('login');
                 loadLoginCaptcha();
+                applyAnonFrontendBtn();
             } else {
                 showPage('chat');
                 initChat();
@@ -1104,7 +1121,7 @@
             return;
         }
 
-        // 2. If no localStorage product, try user's default
+        // 2. If no localStorage product, try user's default, then system default
         if (!localStorage.getItem('askflow_product_id')) {
             var session = getSession();
             if (session) {
@@ -1118,11 +1135,20 @@
                         localStorage.setItem('askflow_product_id', pref.default_product_id);
                         var selector = document.getElementById('chat-product-selector');
                         if (selector) selector.value = pref.default_product_id;
+                    } else if (systemDefaultProductID) {
+                        // Fall back to system-wide default product
+                        localStorage.setItem('askflow_product_id', systemDefaultProductID);
+                        var selector2 = document.getElementById('chat-product-selector');
+                        if (selector2) selector2.value = systemDefaultProductID;
                     }
                     if (callback) callback();
                 })
                 .catch(function () { if (callback) callback(); });
                 return;
+            }
+            // No session but system default exists
+            if (systemDefaultProductID) {
+                localStorage.setItem('askflow_product_id', systemDefaultProductID);
             }
         }
 
@@ -1460,7 +1486,11 @@
             for (var j = 0; j < msg.sources.length; j++) {
                 var src = msg.sources[j];
                 html += '<li class="chat-source-item">';
-                var docName = escapeHtml(src.document_name || i18n.t('chat_source_unknown'));
+                var rawDocName = src.document_name || i18n.t('chat_source_unknown');
+                // Localize admin answer labels (backend stores English tags)
+                rawDocName = rawDocName.replace(/^Admin Answer:\s*/, i18n.t('chat_source_admin_answer') + ': ');
+                rawDocName = rawDocName.replace(/^管理员回答:\s*/, i18n.t('chat_source_admin_answer') + ': ');
+                var docName = escapeHtml(rawDocName);
                 var canDownload = msg.allowDownload && src.document_id && src.document_type && downloadableTypes[(src.document_type || '').toLowerCase()];
                 if (canDownload) {
                     var dlToken = getChatToken();
@@ -1490,7 +1520,16 @@
                     html += '<span class="chat-source-time">🕐 ' + timeLabel + '</span>';
                 }
                 if (src.snippet) {
-                    html += '<span class="chat-source-snippet">' + escapeHtml(src.snippet) + '</span>';
+                    var localSnippet = src.snippet;
+                    // Localize Q&A prefixes in snippet (backend stores English tags)
+                    localSnippet = localSnippet.replace(/^Q:\s*/, i18n.t('chat_source_question_prefix') + ': ');
+                    localSnippet = localSnippet.replace(/\nA:\s*/, '\n' + i18n.t('chat_source_answer_prefix') + ': ');
+                    // Also handle legacy Chinese labels from old data
+                    localSnippet = localSnippet.replace(/^问题：/, i18n.t('chat_source_question_prefix') + ': ');
+                    localSnippet = localSnippet.replace(/\n回答：/, '\n' + i18n.t('chat_source_answer_prefix') + ': ');
+                    localSnippet = localSnippet.replace(/^\[Image Answer:\s*/, '[' + i18n.t('chat_source_image_answer') + ': ');
+                    localSnippet = localSnippet.replace(/^\[图片回答:\s*/, '[' + i18n.t('chat_source_image_answer') + ': ');
+                    html += '<span class="chat-source-snippet">' + escapeHtml(localSnippet) + '</span>';
                 }
                 if (src.image_url) {
                     html += '<span class="chat-source-snippet">' + i18n.t('chat_source_image') + '</span>';
@@ -1866,8 +1905,17 @@
             return html;
         });
 
-        // Linkify URLs
-        text = text.replace(/(https?:\/\/[^\s<&]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+        // Markdown links [text](url) — must come before bare URL linkification
+        text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, function(m, linkText, url) {
+            // Restore &amp; back to & in href (escapeHtml runs first)
+            var href = url.replace(/&amp;/g, '&');
+            return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + linkText + '</a>';
+        });
+
+        // Linkify bare URLs that are NOT already inside an anchor tag
+        text = text.replace(/(^|[^"'>])(https?:\/\/[^\s<&]+)/g, function(m, prefix, url) {
+            return prefix + '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+        });
 
         // Line breaks (preserve newlines outside of block elements)
         text = text.replace(/\n/g, '<br>');
@@ -2232,6 +2280,7 @@
         if (tab === 'batchimport') { loadBatchImportProductSelector(); }
         if (tab === 'faq') { loadFAQAdminProductSelector(); }
         if (tab === 'shops') { loadShopsProductSelector(); }
+        if (tab === 'store-settings') { loadStoreSettings(); }
     };
 
     // --- Settings Sub-Tab Switching ---
@@ -2534,8 +2583,9 @@
         var batchimportNav = document.querySelector('.admin-nav-item[data-tab="batchimport"]');
         var shopsNav = document.querySelector('.admin-nav-item[data-tab="shops"]');
         var multimodalNav = document.querySelector('.admin-nav-item[data-tab="multimodal"]');
+        var storeSettingsNav = document.querySelector('.admin-nav-item[data-tab="store-settings"]');
 
-        // Store owner (editor with store context): only show documents, pending, knowledge, FAQ
+        // Store owner (editor with store context): only show documents, pending, knowledge, FAQ, store-settings
         var storeCtx = null;
         try { storeCtx = JSON.parse(localStorage.getItem('askflow_store_context')); } catch (e) {}
         if (storeCtx && storeCtx.scope === 'store') {
@@ -2547,9 +2597,13 @@
             if (batchimportNav) batchimportNav.style.display = 'none';
             if (shopsNav) shopsNav.style.display = 'none';
             if (multimodalNav) multimodalNav.style.display = 'none';
+            if (storeSettingsNav) storeSettingsNav.style.display = '';
             showStoreOwnerBanner();
             return;
         }
+
+        // Non-store owners: hide store-settings tab
+        if (storeSettingsNav) storeSettingsNav.style.display = 'none';
 
         // Anonymous viewer: show all tabs (like super_admin) for demo purposes,
         // but show read-only banner. Backend rejects all write operations.
@@ -2622,6 +2676,83 @@
             usernameDisplay.textContent = storeName;
         }
     }
+
+    // --- Store Settings ---
+
+    // Simple markdown to HTML converter for preview
+    function simpleMarkdownToHtml(md) {
+        if (!md) return '';
+        var html = escapeHtml(md);
+        // Headers
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        // Bold and italic
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // Links (only allow http/https)
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        // Unordered lists
+        html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        // Line breaks (double newline = paragraph, single = br)
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = html.replace(/\n/g, '<br>');
+        html = '<p>' + html + '</p>';
+        // Clean up empty paragraphs
+        html = html.replace(/<p><\/p>/g, '');
+        return html;
+    }
+
+    function loadStoreSettings() {
+        var textarea = document.getElementById('store-settings-welcome');
+        var preview = document.getElementById('store-settings-welcome-preview');
+        if (!textarea) return;
+
+        adminFetch('/api/admin/store-settings')
+            .then(function (res) {
+                if (!res.ok) throw new Error('load failed');
+                return res.json();
+            })
+            .then(function (data) {
+                textarea.value = data.welcome_message || '';
+                if (preview) preview.innerHTML = simpleMarkdownToHtml(data.welcome_message || '');
+            })
+            .catch(function () {
+                textarea.value = '';
+                if (preview) preview.innerHTML = '';
+            });
+
+        // Live preview on input
+        if (!textarea._previewBound) {
+            textarea._previewBound = true;
+            textarea.addEventListener('input', function () {
+                if (preview) preview.innerHTML = simpleMarkdownToHtml(textarea.value);
+            });
+        }
+    }
+
+    window.saveStoreWelcomeMessage = function () {
+        var textarea = document.getElementById('store-settings-welcome');
+        if (!textarea) return;
+        var msg = textarea.value;
+
+        adminFetch('/api/admin/store-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ welcome_message: msg })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '保存失败'); });
+            showAdminToast(i18n.t('admin_store_settings_saved') || '欢迎消息已保存', 'success');
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || '保存失败', 'error');
+        });
+    };
 
     // --- Document Management ---
 
@@ -5106,20 +5237,28 @@
                 el.placeholder = i18n.t(el.getAttribute('data-i18n-placeholder'));
             });
         }
-        adminFetch('/api/products?exclude_shop=1')
+        // Fetch products and default product ID in parallel
+        var pProducts = adminFetch('/api/products?exclude_shop=1')
             .then(function (res) {
                 if (!res.ok) throw new Error('load failed');
                 return res.json();
             })
-            .then(function (data) {
-                renderProducts(data.products || []);
+            .then(function (data) { return data.products || []; });
+        var pDefault = adminFetch('/api/products/default')
+            .then(function (res) { return res.json(); })
+            .then(function (data) { return data.default_product_id || ''; })
+            .catch(function () { return ''; });
+
+        Promise.all([pProducts, pDefault])
+            .then(function (results) {
+                renderProducts(results[0], results[1]);
             })
             .catch(function () {
-                renderProducts([]);
+                renderProducts([], '');
             });
     }
 
-    function renderProducts(products) {
+    function renderProducts(products, defaultProductID) {
         var tbody = document.getElementById('admin-products-tbody');
         if (!tbody) return;
 
@@ -5127,7 +5266,7 @@
         window._cachedProducts = products;
 
         if (!products || products.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
             return;
         }
 
@@ -5137,7 +5276,9 @@
             var createdAt = p.created_at ? new Date(p.created_at).toLocaleString() : '-';
             var typeLabel = p.type === 'knowledge_base' ? i18n.t('admin_products_type_knowledge') : i18n.t('admin_products_type_service');
             var dlLabel = p.allow_download ? '✅' : '❌';
+            var checked = (p.id === defaultProductID) ? ' checked' : '';
             html += '<tr>' +
+                '<td style="text-align:center"><input type="radio" name="default-product" value="' + escapeHtml(p.id) + '"' + checked + ' onchange="setDefaultProduct(\'' + escapeHtml(p.id) + '\')" /></td>' +
                 '<td>' + escapeHtml(p.name) + '</td>' +
                 '<td><code style="font-size:12px;user-select:all">' + escapeHtml(p.id) + '</code></td>' +
                 '<td>' + escapeHtml(typeLabel) + '</td>' +
@@ -5152,6 +5293,23 @@
         }
         tbody.innerHTML = html;
     }
+
+    // Set the system-wide default product
+    window.setDefaultProduct = function (productId) {
+        adminFetch('/api/products/default', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ product_id: productId })
+        })
+        .then(function (res) {
+            if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || '设置失败'); });
+            showAdminToast(i18n.t('admin_products_default_set') || '已设为默认产品', 'success');
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || '设置默认产品失败', 'error');
+            loadProducts(); // reload to restore correct state
+        });
+    };
 
     window.createProduct = function () {
         var name = (document.getElementById('product-new-name') || {}).value || '';
@@ -5666,13 +5824,13 @@
                         '<path d="M16 20h16M16 24h12M16 28h14M14 16h20a2 2 0 012 2v12a2 2 0 01-2 2H14a2 2 0 01-2-2V18a2 2 0 012-2z" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
                     '</svg>' +
                 '</div>' +
-                '<h2 class="about-dialog-title">问渠</h2>' +
+                '<h2 class="about-dialog-title">' + i18n.t('about_title') + '</h2>' +
                 '<div class="about-dialog-version">V1.0 Beta</div>' +
                 '<div class="about-dialog-quote">' +
-                    '<p class="about-dialog-poem">问渠那得清如许？为有源头活水来。</p>' +
-                    '<p class="about-dialog-poet">—— 朱熹《观书有感》</p>' +
+                    '<p class="about-dialog-poem">' + i18n.t('about_poem_line1') + '<br>' + i18n.t('about_poem_line2') + '</p>' +
+                    '<p class="about-dialog-poet">' + i18n.t('about_poet') + '</p>' +
                 '</div>' +
-                '<div class="about-dialog-author">作者：Dr. Daniel</div>' +
+                '<div class="about-dialog-author">' + i18n.t('about_author') + '</div>' +
                 '<div class="about-dialog-github"><a href="https://github.com/Vantagics/AskFlow.git" target="_blank" rel="noopener noreferrer">GitHub: Vantagics/AskFlow</a></div>' +
             '</div>';
         overlay.addEventListener('click', function (e) {
@@ -5696,6 +5854,83 @@
     };
 
     // --- Init ---
+
+    // Perform #anonymous hash-based anonymous login.
+    // Called after system/admin status is fetched so all global state is ready.
+    // Returns a Promise that resolves to true if anonymous login was handled.
+    function performAnonymousHashLogin() {
+        var hash = window.location.hash;
+        if (hash !== '#anonymous') return Promise.resolve(false);
+
+        // Already logged in — just clear hash and continue normally
+        if (getSession()) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            return Promise.resolve(false);
+        }
+
+        // Anonymous frontend must be enabled (already fetched by init's p2)
+        if (!anonymousFrontendEnabled) {
+            history.replaceState(null, '', window.location.pathname + window.location.search);
+            return Promise.resolve(false);
+        }
+
+        // Perform anonymous login
+        return fetch('/api/auth/anonymous-login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        })
+        .then(function (res) {
+            if (!res.ok) {
+                return res.json().then(function (d) { throw new Error(d.error || 'anonymous login failed'); });
+            }
+            return res.json();
+        })
+        .then(function (data) {
+            if (data.session && data.user) {
+                saveSession(data.session, data.user);
+                // Clear hash
+                history.replaceState(null, '', '/');
+                // Select system default product, or fall back to first product
+                return fetchProducts('default').then(function (products) {
+                    var filtered = products.filter(function (p) {
+                        var n = (p.name || '').trim().toLowerCase();
+                        return n !== '全部产品' && n !== 'all products';
+                    });
+                    var selected = null;
+                    // Try system default product first
+                    if (systemDefaultProductID) {
+                        for (var i = 0; i < filtered.length; i++) {
+                            if (filtered[i].id === systemDefaultProductID) {
+                                selected = filtered[i];
+                                break;
+                            }
+                        }
+                    }
+                    // Fall back to first product
+                    if (!selected && filtered.length > 0) {
+                        selected = filtered[0];
+                    }
+                    if (selected) {
+                        localStorage.setItem('askflow_product_id', selected.id);
+                        localStorage.setItem('askflow_product_name', selected.name);
+                    }
+                    return true;
+                });
+            }
+            return false;
+        })
+        .catch(function (err) {
+            // On failure, clear hash and show error on login page
+            history.replaceState(null, '', window.location.pathname);
+            var errorEl = document.getElementById('user-login-error');
+            if (errorEl) {
+                errorEl.textContent = err.message || 'anonymous login failed';
+                errorEl.classList.remove('hidden');
+            }
+            return false;
+        });
+    }
 
     function init() {
         // Check for OAuth callback first
@@ -5732,6 +5967,8 @@
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 if (data.login_route) adminLoginRoute = data.login_route;
+                anonymousFrontendEnabled = !!data.anonymous_frontend;
+                systemDefaultProductID = data.default_product_id || '';
                 // Show/hide frontend anonymous login button
                 var anonFrontendBtn = document.getElementById('anonymous-frontend-login-btn');
                 if (anonFrontendBtn) {
@@ -5745,9 +5982,17 @@
             .catch(function () { /* use default */ });
 
         Promise.all([p1, p2]).then(function () {
-            handleRoute();
-            // Fetch translated product name in background (LLM call, can be slow)
-            fetchProductName();
+            // After status is loaded, check for #anonymous hash-based login
+            return performAnonymousHashLogin().then(function (handled) {
+                if (handled) {
+                    // Anonymous login succeeded — navigate to chat
+                    navigate('/chat');
+                    fetchProductName();
+                } else {
+                    handleRoute();
+                    fetchProductName();
+                }
+            });
         }).catch(function () {
             handleRoute();
         });

@@ -137,6 +137,9 @@ func HandleAdminLogin(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusUnauthorized, err.Error())
 			return
 		}
+		if resp.Session != nil {
+			SetSessionCookie(w, resp.Session.ID, 86400)
+		}
 		WriteJSON(w, http.StatusOK, resp)
 	}
 }
@@ -208,16 +211,19 @@ func HandleAdminStatus(app *App) http.HandlerFunc {
 		var loginRoute string
 		var anonymousMode bool
 		var anonymousFrontend bool
+		var defaultProductID string
 		if cfg != nil {
 			loginRoute = cfg.Admin.LoginRoute
 			anonymousMode = cfg.Admin.AnonymousMode
 			anonymousFrontend = cfg.Admin.AnonymousFrontend
+			defaultProductID = cfg.Admin.DefaultProductID
 		}
 		WriteJSON(w, http.StatusOK, map[string]interface{}{
 			"configured":         app.IsAdminConfigured(),
 			"login_route":        loginRoute,
 			"anonymous_mode":     anonymousMode,
 			"anonymous_frontend": anonymousFrontend,
+			"default_product_id": defaultProductID,
 		})
 	}
 }
@@ -337,6 +343,9 @@ func HandleUserLogin(app *App) http.HandlerFunc {
 		if err != nil {
 			WriteError(w, http.StatusUnauthorized, err.Error())
 			return
+		}
+		if resp.Session != nil {
+			SetSessionCookie(w, resp.Session.ID, 86400)
 		}
 		WriteJSON(w, http.StatusOK, resp)
 	}
@@ -597,6 +606,7 @@ func handleStoreScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeID i
 		return
 	}
 
+	SetSessionCookie(w, session.ID, 86400) // 24h
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"admin_session": session,
 		"admin_user": map[string]string{
@@ -635,6 +645,8 @@ func handleCustomerScope(w http.ResponseWriter, app *App, ti *TicketInfo, storeI
 		})
 		return
 	}
+
+	SetSessionCookie(w, session.ID, 86400) // 24h
 
 	resp := map[string]interface{}{
 		"session": session,
@@ -686,6 +698,7 @@ func handlePlainScope(w http.ResponseWriter, app *App, ti *TicketInfo) {
 		return
 	}
 
+	SetSessionCookie(w, session.ID, 86400) // 24h
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"session": session,
 		"user": map[string]string{

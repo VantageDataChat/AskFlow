@@ -349,3 +349,70 @@ func HandleAdminShopDelete(app *App) http.HandlerFunc {
 	}
 }
 
+
+// HandleStoreSettings handles GET/PUT for the store owner's shop product welcome message.
+// GET returns the current welcome_message for the store's sub-product.
+// PUT updates the welcome_message (supports markdown).
+func HandleStoreSettings(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID, _, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+
+		// Find the shop associated with this store admin
+		foundShop, err := app.GetShopByAdminUserID(userID)
+		if err != nil || foundShop == nil {
+			WriteError(w, http.StatusForbidden, "非店铺管理员或店铺不存在")
+			return
+		}
+
+		productID := foundShop.ShopModuleProductID
+		if productID == "" {
+			WriteError(w, http.StatusBadRequest, "店铺子产品未创建")
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			p, err := app.GetProduct(productID)
+			if err != nil || p == nil {
+				WriteError(w, http.StatusNotFound, "子产品不存在")
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]interface{}{
+				"welcome_message": p.WelcomeMessage,
+				"shop_name":       foundShop.Name,
+				"product_id":      productID,
+			})
+
+		case http.MethodPut:
+			var req struct {
+				WelcomeMessage string `json:"welcome_message"`
+			}
+			if err := ReadJSONBody(r, &req); err != nil {
+				WriteError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			if len(req.WelcomeMessage) > 10000 {
+				WriteError(w, http.StatusBadRequest, "欢迎消息过长（最多10000字符）")
+				return
+			}
+			if err := app.UpdateProductWelcomeMessage(productID, req.WelcomeMessage); err != nil {
+				log.Printf("[StoreSettings] update welcome message error: %v", err)
+				WriteError(w, http.StatusInternalServerError, "更新欢迎消息失败")
+				return
+			}
+			// Also update the shop's welcome_message to keep in sync
+			if foundShop.StorefrontID > 0 {
+				_ = app.shopService.UpdateWelcomeMessage(foundShop.StorefrontID, req.WelcomeMessage)
+			}
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
+}
+

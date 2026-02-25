@@ -64,13 +64,18 @@ func ShopIsolation(sessionMgr *auth.SessionManager, readDB *sql.DB, shopSvc *sho
 		return func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 
-			// 1. Extract session token from Authorization header.
+			// 1. Extract session token from Authorization header, with cookie fallback.
 			authHeader := r.Header.Get("Authorization")
 			token := strings.TrimPrefix(authHeader, "Bearer ")
 			if token == "" || token == authHeader {
-				// No valid bearer token — pass through as non-shop user.
-				next(w, r)
-				return
+				// Fallback: read from session cookie (iframe cross-origin scenario).
+				if c, err := r.Cookie("session_id"); err == nil && c.Value != "" {
+					token = c.Value
+				} else {
+					// No valid token — pass through as non-shop user.
+					next(w, r)
+					return
+				}
 			}
 
 			// 2. Validate session.

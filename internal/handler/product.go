@@ -201,6 +201,64 @@ func HandleMyProducts(app *App) http.HandlerFunc {
 	}
 }
 
+// HandleDefaultProduct handles GET/PUT for the system-wide default product.
+// GET returns the current default product ID.
+// PUT sets the default product ID (super_admin only).
+func HandleDefaultProduct(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			cfg := app.configManager.Get()
+			var dpID string
+			if cfg != nil {
+				dpID = cfg.Admin.DefaultProductID
+			}
+			WriteJSON(w, http.StatusOK, map[string]string{"default_product_id": dpID})
+
+		case http.MethodPut:
+			_, role, err := GetAdminSession(app, r)
+			if err != nil {
+				WriteAdminSessionError(w, err)
+				return
+			}
+			if role != "super_admin" {
+				WriteError(w, http.StatusForbidden, "仅超级管理员可设置默认产品")
+				return
+			}
+			var req struct {
+				ProductID string `json:"product_id"`
+			}
+			if err := ReadJSONBody(r, &req); err != nil {
+				WriteError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			// Allow empty string to clear default
+			if req.ProductID != "" {
+				if !IsValidHexID(req.ProductID) {
+					WriteError(w, http.StatusBadRequest, "invalid product_id")
+					return
+				}
+				// Verify product exists
+				p, err := app.GetProduct(req.ProductID)
+				if err != nil || p == nil {
+					WriteError(w, http.StatusBadRequest, "产品不存在")
+					return
+				}
+			}
+			if err := app.UpdateConfig(map[string]interface{}{
+				"admin.default_product_id": req.ProductID,
+			}); err != nil {
+				WriteError(w, http.StatusInternalServerError, "设置默认产品失败")
+				return
+			}
+			WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
+}
+
 // HandleProductIntro returns the product introduction/welcome message.
 func HandleProductIntro(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

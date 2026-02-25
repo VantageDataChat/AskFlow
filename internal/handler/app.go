@@ -1499,6 +1499,31 @@ func (a *App) DeleteProduct(id string) error {
 	return a.productService.Delete(id)
 }
 
+// GetShopByAdminUserID returns the shop associated with the given admin session userID.
+// The admin session userID is "admin_{subAdminID}", and the sub-admin username is "store_{shopID}".
+func (a *App) GetShopByAdminUserID(adminUserID string) (*shop.Shop, error) {
+	actualID := strings.TrimPrefix(adminUserID, "admin_")
+	var username string
+	err := a.readDB.QueryRow(`SELECT username FROM admin_users WHERE id = ?`, actualID).Scan(&username)
+	if err != nil {
+		return nil, fmt.Errorf("admin user not found")
+	}
+	if !strings.HasPrefix(username, "store_") {
+		return nil, fmt.Errorf("not a store owner admin")
+	}
+	shopID := strings.TrimPrefix(username, "store_")
+	return a.shopService.GetByID(shopID)
+}
+
+// UpdateProductWelcomeMessage updates only the welcome_message field of a product.
+func (a *App) UpdateProductWelcomeMessage(productID, welcomeMessage string) error {
+	_, err := a.db.Exec(
+		`UPDATE products SET welcome_message = ?, updated_at = ? WHERE id = ?`,
+		welcomeMessage, time.Now(), productID,
+	)
+	return err
+}
+
 // GetProduct retrieves a product by ID.
 func (a *App) GetProduct(id string) (*product.Product, error) {
 	return a.productService.GetByID(id)

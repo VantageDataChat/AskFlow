@@ -56,13 +56,21 @@ if %errorlevel% neq 0 (
 echo        Build OK
 echo.
 
-echo [3.5/4] Packaging built artifacts on server...
+echo [4/7] Configuring ffmpeg in config.json...
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\"ffmpeg_path\": \"[^\"]*\"/\"ffmpeg_path\": \"\/usr\/bin\/ffmpeg\"/' %REMOTE_DIR%/data/config.json 2>/dev/null && echo '  Config updated'"
+echo.
+
+echo [5/7] Restarting service...
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "chmod +x %REMOTE_DIR%/start.sh && bash %REMOTE_DIR%/start.sh"
+echo.
+
+echo [6/7] Packaging built artifacts on server...
 set RELEASE_NAME=askflow_release_linux.tar.gz
 %SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "cd %REMOTE_DIR% && tar -czf %RELEASE_NAME% %BINARY_NAME% frontend"
 echo        Package OK
 echo.
 
-echo [3.6/4] Downloading release package to local...
+echo [7/7] Downloading release package to local...
 if exist %RELEASE_NAME% del /f %RELEASE_NAME%
 %SSHPASS% -p %PASS% scp -o StrictHostKeyChecking=accept-new -q %USER%@%SERVER%:%REMOTE_DIR%/%RELEASE_NAME% .
 if %errorlevel% neq 0 (
@@ -70,14 +78,6 @@ if %errorlevel% neq 0 (
 ) else (
     echo        Download OK: %RELEASE_NAME%
 )
-echo.
-
-echo [4/4] Restarting service...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "chmod +x %REMOTE_DIR%/start.sh && bash %REMOTE_DIR%/start.sh"
-echo.
-
-echo [5/5] Configuring ffmpeg in config.json...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\"ffmpeg_path\": \"[^\"]*\"/\"ffmpeg_path\": \"\/usr\/bin\/ffmpeg\"/' %REMOTE_DIR%/data/config.json 2>/dev/null && echo '  Config updated'"
 echo.
 
 REM --- Cleanup ---

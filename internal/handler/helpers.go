@@ -119,11 +119,42 @@ func ReadJSONBody(r *http.Request, v interface{}) error {
 }
 
 // GetUserSession validates the Authorization bearer token and returns the user ID.
-func GetUserSession(app *App, r *http.Request) (string, error) {
+// sessionCookieName is the cookie name used for session tokens in iframe scenarios.
+const sessionCookieName = "session_id"
+
+// SetSessionCookie sets a session cookie with SameSite=None and Secure so that
+// cross-origin iframes (e.g. market.vantagics.com embedding service.vantagics.com)
+// can send the session token automatically.
+func SetSessionCookie(w http.ResponseWriter, sessionID string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookieName,
+		Value:    sessionID,
+		Path:     "/",
+		MaxAge:   maxAge,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+	})
+}
+
+// extractSessionToken reads the session token from the Authorization header first,
+// falling back to the session_id cookie for cross-origin iframe scenarios.
+func extractSessionToken(r *http.Request) string {
 	authHeader := r.Header.Get("Authorization")
 	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == "" || token == authHeader {
-		// token is empty, or Authorization header didn't have "Bearer " prefix
+	if token != "" && token != authHeader {
+		return token
+	}
+	// Fallback: read from cookie (iframe cross-origin scenario)
+	if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
+		return c.Value
+	}
+	return ""
+}
+
+func GetUserSession(app *App, r *http.Request) (string, error) {
+	token := extractSessionToken(r)
+	if token == "" {
 		return "", fmt.Errorf("未登录")
 	}
 	session, err := app.sessionManager.ValidateSession(token)
@@ -137,9 +168,8 @@ func GetUserSession(app *App, r *http.Request) (string, error) {
 // Returns (userID, role, error). role is "super_admin", "editor", or "anonymous_viewer".
 // Anonymous viewers are restricted to GET requests only.
 func GetAdminSession(app *App, r *http.Request) (string, string, error) {
-	authHeader := r.Header.Get("Authorization")
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == "" || token == authHeader {
+	token := extractSessionToken(r)
+	if token == "" {
 		return "", "", fmt.Errorf("未登录")
 	}
 	session, err := app.sessionManager.ValidateSession(token)

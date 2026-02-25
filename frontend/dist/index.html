@@ -703,6 +703,14 @@
 
                         </button>
 
+                        <button class="admin-nav-item" data-tab="store-settings" onclick="switchAdminTab('store-settings')" style="display:none">
+
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+
+                            <span data-i18n="admin_nav_store_settings">店铺设置</span>
+
+                        </button>
+
                         <button class="admin-nav-item" data-tab="multimodal" onclick="switchAdminTab('multimodal')">
 
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
@@ -1107,7 +1115,7 @@
 
                                         <textarea id="cfg-product-intro" rows="4" data-i18n-placeholder="admin_settings_product_intro_placeholder" placeholder="输入产品简介，用户登录后将作为欢迎信息显示"></textarea>
 
-                                        <span class="admin-form-hint" data-i18n="admin_settings_product_intro_hint">用户登录后在聊天页面显示此信息</span>
+                                        <span class="admin-form-hint" data-i18n="admin_settings_product_intro_hint">用户登录后在聊天页面显示此信息，支持 Markdown 语法（如 [链接文字](https://example.com)、**加粗**、*斜体*）</span>
 
                                     </div>
 
@@ -2001,7 +2009,7 @@
 
                                         <label data-i18n="admin_products_welcome">欢迎消息</label>
 
-                                        <textarea id="product-new-welcome" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选）"></textarea>
+                                        <textarea id="product-new-welcome" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选），支持 Markdown 语法"></textarea>
 
                                     </div>
 
@@ -2035,6 +2043,8 @@
 
                                                 <tr>
 
+                                                    <th data-i18n="admin_products_th_default">默认</th>
+
                                                     <th data-i18n="admin_products_th_name">名称</th>
 
                                                     <th data-i18n="admin_products_th_id">产品ID</th>
@@ -2055,7 +2065,7 @@
 
                                             <tbody id="admin-products-tbody">
 
-                                                <tr><td colspan="7" class="admin-table-empty" data-i18n="admin_products_empty">暂无产品</td></tr>
+                                                <tr><td colspan="8" class="admin-table-empty" data-i18n="admin_products_empty">暂无产品</td></tr>
 
                                             </tbody>
 
@@ -2115,7 +2125,7 @@
 
                                             <label data-i18n="admin_products_welcome">欢迎消息</label>
 
-                                            <textarea id="product-edit-welcome" class="admin-input" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选）"></textarea>
+                                            <textarea id="product-edit-welcome" class="admin-input" rows="3" data-i18n-placeholder="admin_products_welcome_placeholder" placeholder="用户选择该产品后显示的欢迎消息（可选），支持 Markdown 语法"></textarea>
 
                                         </div>
 
@@ -2846,6 +2856,56 @@
 
                     </div>
 
+
+                    <!-- Store Settings Tab (visible only to store owners) -->
+
+                    <div id="admin-tab-store-settings" class="admin-tab hidden">
+
+                        <div class="admin-tab-header">
+
+                            <h2 data-i18n="admin_store_settings_title">店铺设置</h2>
+
+                        </div>
+
+                        <div class="admin-section">
+
+                            <fieldset class="admin-fieldset">
+
+                                <legend data-i18n="admin_store_settings_welcome_legend">欢迎消息设置</legend>
+
+                                <p class="admin-hint" data-i18n="admin_store_settings_welcome_hint">设置客户进入聊天时显示的欢迎消息，支持 Markdown 语法。</p>
+
+                                <div style="display:flex;gap:12px;margin-top:8px;">
+
+                                    <div style="flex:1;display:flex;flex-direction:column;">
+
+                                        <label style="font-size:13px;font-weight:600;margin-bottom:4px;" data-i18n="admin_store_settings_edit_label">编辑</label>
+
+                                        <textarea id="store-settings-welcome" rows="14" style="width:100%;font-family:monospace;font-size:13px;padding:8px;border:1px solid #d1d5db;border-radius:6px;resize:vertical;" placeholder="输入欢迎消息，支持 Markdown..." data-i18n-placeholder="admin_store_settings_welcome_placeholder"></textarea>
+
+                                    </div>
+
+                                    <div style="flex:1;display:flex;flex-direction:column;">
+
+                                        <label style="font-size:13px;font-weight:600;margin-bottom:4px;" data-i18n="admin_store_settings_preview_label">预览</label>
+
+                                        <div id="store-settings-welcome-preview" class="markdown-preview" style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:6px;overflow-y:auto;min-height:200px;background:#fafafa;font-size:14px;line-height:1.6;"></div>
+
+                                    </div>
+
+                                </div>
+
+                                <div style="margin-top:10px;display:flex;gap:8px;">
+
+                                    <button class="btn-primary" onclick="saveStoreWelcomeMessage()" data-i18n="admin_store_settings_save_btn">保存</button>
+
+                                </div>
+
+                            </fieldset>
+
+                        </div>
+
+                    </div>
 
 
                     <!-- FAQ Admin Tab -->

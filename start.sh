@@ -5,6 +5,9 @@ cd __REMOTE_DIR__
 
 pkill -f './askflow' 2>/dev/null
 sleep 1
+# 确保进程真的被杀掉
+pkill -9 -f './askflow' 2>/dev/null
+sleep 1
 nohup ./askflow > askflow.log 2>&1 &
 sleep 2
 if ss -tlnp | grep -q ':8080 '; then
@@ -15,6 +18,8 @@ else
         echo "Config file corrupted, removing and retrying..."
         rm -f data/config.json
         pkill -f './askflow' 2>/dev/null
+        sleep 1
+        pkill -9 -f './askflow' 2>/dev/null
         sleep 1
         nohup ./askflow > askflow.log 2>&1 &
         sleep 2

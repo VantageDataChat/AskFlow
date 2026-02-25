@@ -126,6 +126,7 @@ type AdminConfig struct {
 	LoginRoute        string `json:"login_route"`
 	AnonymousMode     bool   `json:"anonymous_mode"`
 	AnonymousFrontend bool   `json:"anonymous_frontend"`
+	DefaultProductID  string `json:"default_product_id"`
 }
 
 // ConfigManager manages loading, saving, and updating configuration.
@@ -543,6 +544,13 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("expected boolean")
 		}
 		cm.config.Admin.AnonymousFrontend = b
+
+	case "admin.default_product_id":
+		s, ok := val.(string)
+		if !ok {
+			return errors.New("expected string")
+		}
+		cm.config.Admin.DefaultProductID = s
 
 	// SMTP fields
 	case "smtp.host":

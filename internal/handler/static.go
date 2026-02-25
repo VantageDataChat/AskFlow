@@ -26,6 +26,18 @@ func SpaHandler(dir string) http.Handler {
 	fileServer := http.FileServer(http.Dir(dir))
 	indexPath := filepath.Join(dir, "index.html")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Apply security headers for all responses (including SPA HTML).
+		// This is critical for iframe embedding — without frame-ancestors in CSP,
+		// browsers will block the page from being embedded.
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-XSS-Protection", "0")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self' https://market.vantagics.com")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
+		w.Header().Set("Cross-Origin-Opener-Policy", "unsafe-none")
+
 		// Backend paths must NEVER fall through to the SPA.
 		// If an /api/* or /auth/* request reaches here, it means no specific
 		// handler was registered for it — return a proper error, not HTML.

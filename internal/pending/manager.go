@@ -287,12 +287,12 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 
 	// Step 3: Chunk the Q&A content → embed → store in vector store
 	docID := "pending-answer-" + req.QuestionID
-	docName := "管理员回答: " + truncate(question, 50)
+	docName := "Admin Answer: " + truncate(question, 50)
 	docCreated := false
 
 	if answerText != "" {
 		// Combine question and answer for better semantic matching
-		qaText := "问题：" + question + "\n回答：" + answerText
+		qaText := "Q: " + question + "\nA: " + answerText
 
 		chunks := pm.chunker.Split(qaText, docID)
 		if len(chunks) > 0 {
@@ -346,7 +346,7 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 			}
 		}
 
-		imgText := fmt.Sprintf("[图片回答: %s] %s", truncate(question, 50), answerText)
+		imgText := fmt.Sprintf("[Image Answer: %s] %s", truncate(question, 50), answerText)
 		// Embed the text once and reuse the vector for all images (same text → same embedding)
 		imgVec, embErr := pm.embeddingService.Embed(imgText)
 		if embErr != nil {
@@ -360,7 +360,7 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 				vecCopy := make([]float64, len(imgVec))
 				copy(vecCopy, imgVec)
 				imgChunk := []vectorstore.VectorChunk{{
-					ChunkText:    fmt.Sprintf("[图片回答: %s]", truncate(question, 50)),
+					ChunkText:    fmt.Sprintf("[Image Answer: %s]", truncate(question, 50)),
 					ChunkIndex:   1000 + i,
 					DocumentID:   docID,
 					DocumentName: docName,

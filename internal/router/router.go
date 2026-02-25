@@ -152,6 +152,7 @@ func Register(app *handler.App) func() {
 	http.HandleFunc("/api/admin/bans/add", secure(handler.HandleAdminAddBan(app)))
 
 	// ── Products ──
+	http.HandleFunc("/api/products/default", secure(handler.HandleDefaultProduct(app)))
 	http.HandleFunc("/api/products/my", secure(handler.HandleMyProducts(app)))
 	http.HandleFunc("/api/products/", secure(handler.HandleProductByID(app)))
 	http.HandleFunc("/api/products", secure(handler.HandleProducts(app)))
@@ -207,6 +208,7 @@ func Register(app *handler.App) func() {
 	// ── Admin shop management ──
 	http.HandleFunc("/api/admin/shops/", secure(handler.HandleAdminShopDelete(app)))
 	http.HandleFunc("/api/admin/shops", secure(handler.HandleAdminShops(app)))
+	http.HandleFunc("/api/admin/store-settings", secure(handler.HandleStoreSettings(app)))
 
 	// Return cleanup function to stop rate limiter goroutines
 	return func() {

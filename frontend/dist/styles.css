@@ -3327,8 +3327,9 @@ a.chat-source-download:hover {
     font-size: 1rem;
     color: #374151;
     margin: 0 0 0.4rem;
-    line-height: 1.6;
+    line-height: 1.8;
     font-style: italic;
+    white-space: nowrap;
 }
 
 .about-dialog-poet {
