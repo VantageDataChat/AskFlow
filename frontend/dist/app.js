@@ -1380,7 +1380,7 @@
         html += renderMarkdown(msg.content);
 
         // Display images as photo wall gallery, video/audio as play buttons
-        var _mediaTypes = { video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1, mp3:1, wav:1, ogg:1, flac:1 };
+        var _mediaTypes = { video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1, mp3:1, m4a:1, wav:1, ogg:1, flac:1 };
         if (!msg.isPending && msg.sources && msg.sources.length > 0) {
             var images = [];
             var videoSegments = {};
@@ -1430,7 +1430,7 @@
                 var mediaUrl = '/api/media/' + encodeURIComponent(vDocId) + '?token=' + encodeURIComponent(getChatToken());
                 var firstStart = seg.times.length > 0 ? seg.times[0].start : 0;
                 var vExt = (seg.name || '').split('.').pop().toLowerCase();
-                var isAudio = (vExt === 'mp3' || vExt === 'wav' || vExt === 'ogg' || vExt === 'flac');
+                var isAudio = (vExt === 'mp3' || vExt === 'm4a' || vExt === 'wav' || vExt === 'ogg' || vExt === 'flac');
                 var mediaIdx = window._mediaRegistry.length;
                 window._mediaRegistry.push({ url: mediaUrl, isAudio: isAudio, startTime: firstStart, name: seg.name || 'media', segments: seg.times });
                 html += '<div class="chat-media-compact">';
@@ -1449,7 +1449,7 @@
         // Sources
         if (!msg.isPending && msg.sources && msg.sources.length > 0) {
             var srcId = 'sources-' + msg.timestamp;
-            var downloadableTypes = { pdf:1, doc:1, docx:1, word:1, xls:1, xlsx:1, excel:1, ppt:1, pptx:1, video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1 };
+            var downloadableTypes = { pdf:1, doc:1, docx:1, word:1, xls:1, xlsx:1, excel:1, ppt:1, pptx:1, video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1, mp3:1, m4a:1, wav:1, ogg:1, flac:1 };
             var productId = localStorage.getItem('askflow_product_id') || '';
             html += '<div class="chat-sources">';
             html += '<button class="chat-sources-toggle" onclick="toggleSources(\'' + srcId + '\', this)">';
@@ -1471,7 +1471,7 @@
                 if (_mediaTypes[srcType] && src.document_id) {
                     var srcMediaUrl = '/api/media/' + encodeURIComponent(src.document_id) + '?token=' + encodeURIComponent(getChatToken());
                     var srcExt = (src.document_name || '').split('.').pop().toLowerCase();
-                    var srcIsAudio = (srcExt === 'mp3' || srcExt === 'wav' || srcExt === 'ogg' || srcExt === 'flac');
+                    var srcIsAudio = (srcExt === 'mp3' || srcExt === 'm4a' || srcExt === 'wav' || srcExt === 'ogg' || srcExt === 'flac');
                     var srcStart = src.start_time || 0;
                     var srcSegs = [];
                     if (src.start_time > 0 || src.end_time > 0) {

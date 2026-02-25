@@ -150,6 +150,7 @@ func HandleMediaStream(app *App) http.HandlerFunc {
 			".mkv":  "video/x-matroska",
 			".mov":  "video/quicktime",
 			".mp3":  "audio/mpeg",
+			".m4a":  "audio/mp4",
 			".wav":  "audio/wav",
 			".ogg":  "audio/ogg",
 			".flac": "audio/flac",
