@@ -28,6 +28,11 @@ var SupportedExtensions = map[string]string{
 	".markdown": "markdown",
 	".html":     "html",
 	".htm":      "html",
+	".mp3":      "mp3",
+	".m4a":      "m4a",
+	".wav":      "wav",
+	".flac":     "flac",
+	".ogg":      "ogg",
 }
 
 // HandleDocuments returns the list of documents, optionally filtered by product ID.
@@ -129,6 +134,11 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 		switch fileType {
 		case "mp4", "avi", "mkv", "mov", "webm":
 			if !IsValidVideoMagicBytes(fileData) {
+				WriteError(w, http.StatusBadRequest, "文件内容与扩展名不匹配")
+				return
+			}
+		case "mp3", "m4a", "wav", "flac", "ogg":
+			if !IsValidAudioMagicBytes(fileData, fileType) {
 				WriteError(w, http.StatusBadRequest, "文件内容与扩展名不匹配")
 				return
 			}
@@ -239,6 +249,7 @@ func HandlePublicDocumentDownload(app *App) http.HandlerFunc {
 		"ppt": true, "pptx": true,
 		"mp4": true, "avi": true, "mkv": true, "mov": true, "webm": true,
 		"video": true,
+		"mp3": true, "m4a": true, "wav": true, "flac": true, "ogg": true,
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

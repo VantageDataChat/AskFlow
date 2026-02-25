@@ -204,6 +204,44 @@ func IsValidVideoMagicBytes(data []byte) bool {
 	return false
 }
 
+// IsValidAudioMagicBytes checks if the file data starts with known audio format magic bytes.
+func IsValidAudioMagicBytes(data []byte, fileType string) bool {
+	if len(data) < 12 {
+		return false
+	}
+	switch fileType {
+	case "mp3":
+		// MP3: starts with ID3 tag or MPEG sync word (0xFF 0xFB/0xF3/0xF2)
+		if len(data) >= 3 && string(data[:3]) == "ID3" {
+			return true
+		}
+		if data[0] == 0xFF && (data[1]&0xE0) == 0xE0 {
+			return true
+		}
+	case "m4a":
+		// M4A: MPEG-4 container, starts with ftyp box (same as MP4)
+		if string(data[4:8]) == "ftyp" {
+			return true
+		}
+	case "wav":
+		// WAV: RIFF....WAVE
+		if string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
+			return true
+		}
+	case "flac":
+		// FLAC: starts with "fLaC"
+		if len(data) >= 4 && string(data[:4]) == "fLaC" {
+			return true
+		}
+	case "ogg":
+		// OGG: starts with "OggS"
+		if len(data) >= 4 && string(data[:4]) == "OggS" {
+			return true
+		}
+	}
+	return false
+}
+
 // IsValidOptionalID validates an optional ID parameter (empty is allowed, non-empty must be hex).
 func IsValidOptionalID(id string) bool {
 	if id == "" {
@@ -252,6 +290,16 @@ func DetectFileType(filename string) string {
 		return "mov"
 	case strings.HasSuffix(lower, ".webm"):
 		return "webm"
+	case strings.HasSuffix(lower, ".mp3"):
+		return "mp3"
+	case strings.HasSuffix(lower, ".m4a"):
+		return "m4a"
+	case strings.HasSuffix(lower, ".wav"):
+		return "wav"
+	case strings.HasSuffix(lower, ".flac"):
+		return "flac"
+	case strings.HasSuffix(lower, ".ogg"):
+		return "ogg"
 	default:
 		return "unknown"
 	}

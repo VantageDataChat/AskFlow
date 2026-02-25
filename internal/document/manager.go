@@ -52,11 +52,21 @@ var supportedFileTypes = map[string]bool{
 	"mkv":          true,
 	"mov":          true,
 	"webm":         true,
+	"mp3":          true,
+	"m4a":          true,
+	"wav":          true,
+	"flac":         true,
+	"ogg":          true,
 }
 
 // videoFileTypes identifies which file types are video formats.
 var videoFileTypes = map[string]bool{
 	"mp4": true, "avi": true, "mkv": true, "mov": true, "webm": true,
+}
+
+// audioFileTypes identifies which file types are audio formats.
+var audioFileTypes = map[string]bool{
+	"mp3": true, "m4a": true, "wav": true, "flac": true, "ogg": true,
 }
 
 // LLMService defines the subset of LLM capabilities needed by DocumentManager.
@@ -157,10 +167,11 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 		errlog.Logf("[Upload] failed to save original file %q (doc=%s): %v", req.FileName, docID, err)
 	}
 
-	// For video, PDF, and PPT files, process asynchronously to avoid HTTP timeout.
+	// For video, audio, PDF, and PPT files, process asynchronously to avoid HTTP timeout.
 	// PDF files (especially scanned PDFs) may require per-page OCR via LLM vision API.
 	// PPT files require per-slide rendering which can take 20+ seconds for large decks.
-	if videoFileTypes[fileType] || fileType == "pdf" || fileType == "ppt" || fileType == "ppt_legacy" {
+	// Audio files require ffmpeg conversion + RapidSpeech ASR transcription.
+	if videoFileTypes[fileType] || audioFileTypes[fileType] || fileType == "pdf" || fileType == "ppt" || fileType == "ppt_legacy" {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -194,6 +205,9 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 				if videoFileTypes[fileType] {
 					log.Printf("[Async] Processing video for doc=%s", docID)
 					done <- dm.processVideo(docID, req.FileName, req.FileData, req.ProductID)
+				} else if audioFileTypes[fileType] {
+					log.Printf("[Async] Processing audio for doc=%s", docID)
+					done <- dm.processAudio(docID, req.FileName, req.FileData, req.ProductID)
 				} else {
 					log.Printf("[Async] Processing file (PDF/PPT) for doc=%s", docID)
 					_, processErr := dm.processFile(docID, req.FileName, req.FileData, fileType, req.ProductID)
@@ -1693,6 +1707,28 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 		}
 	}
 
+	// For audio documents: query transcript chunks from the chunks table.
+	if audioFileTypes[docInfo.Type] {
+		audioRows, err := dm.db.Query(
+			`SELECT chunk_text, chunk_index FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC`,
+			docID,
+		)
+		if err == nil {
+			defer audioRows.Close()
+			for audioRows.Next() {
+				var text string
+				var idx int
+				if err := audioRows.Scan(&text, &idx); err != nil {
+					continue
+				}
+				result.Segments = append(result.Segments, ReviewSegment{
+					Type:    "transcript",
+					Content: text,
+				})
+			}
+		}
+	}
+
 	// For PPT documents: query slide chunks (each slide stored as a chunk with image_url)
 	if docInfo.Type == "ppt" {
 		slideRows, err := dm.db.Query(
@@ -1719,7 +1755,7 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 
 	// For all other document types (PDF, Word, Excel, Markdown, HTML, URL, legacy):
 	// query text chunks and image chunks from the chunks table.
-	if !videoFileTypes[docInfo.Type] && docInfo.Type != "ppt" {
+	if !videoFileTypes[docInfo.Type] && !audioFileTypes[docInfo.Type] && docInfo.Type != "ppt" {
 		chunkRows, err := dm.db.Query(
 			`SELECT chunk_text, chunk_index, COALESCE(image_url, '') FROM chunks WHERE document_id = ? ORDER BY chunk_index ASC`,
 			docID,
