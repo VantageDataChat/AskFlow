@@ -1374,7 +1374,7 @@ a.chat-source-download:hover {
 
 /* Sidebar */
 .admin-sidebar {
-    width: 240px;
+    width: 180px;
     background: linear-gradient(180deg, #E8F0FE 0%, #DBEAFE 100%);
     color: #1E3A8A;
     display: flex;
@@ -1487,7 +1487,7 @@ a.chat-source-download:hover {
     overflow-y: auto;
     overflow-x: hidden;
     background: transparent;
-    padding: 12px 12px 12px 0;
+    padding: 12px 16px 12px 12px;
 }
 
 .admin-tab.hidden { display: none; }
@@ -1800,7 +1800,7 @@ a.chat-source-download:hover {
 .admin-settings-form .admin-form-row input,
 .admin-settings-form .admin-form-row textarea,
 .admin-settings-form .admin-form-row select {
-    max-width: 640px;
+    max-width: 100%;
 }
 
 .admin-fieldset {
@@ -1894,7 +1894,7 @@ a.chat-source-download:hover {
 
 /* Product Management - Professional Layout */
 .product-manage-form {
-    max-width: 900px;
+    max-width: 100%;
 }
 
 .product-add-card {
@@ -2265,7 +2265,7 @@ a.chat-source-download:hover {
 /* Responsive Admin - Tablet */
 @media (min-width: 769px) and (max-width: 1024px) {
     .admin-sidebar {
-        width: 200px;
+        width: 160px;
     }
 
     .admin-tab-body {
