@@ -2156,6 +2156,14 @@ a.chat-source-download:hover {
     padding-right: 0.5rem;
 }
 
+.review-media-player {
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: #F0F7FF;
+    border-radius: var(--radius-lg);
+    border: 1px solid #DBEAFE;
+}
+
 .review-segment {
     border: 1px solid #DBEAFE;
     border-radius: var(--radius-lg);

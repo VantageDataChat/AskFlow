@@ -3137,6 +3137,20 @@
         }
 
         var html = '';
+
+        // For audio/video documents, show an inline player at the top
+        var _audioTypes = { mp3:1, m4a:1, wav:1, ogg:1, flac:1 };
+        var _videoTypes = { video:1, mp4:1, avi:1, mkv:1, mov:1, webm:1 };
+        var reviewDocType = (data.doc_type || '').toLowerCase();
+        if ((_audioTypes[reviewDocType] || _videoTypes[reviewDocType]) && data.doc_id) {
+            var reviewMediaUrl = '/api/media/' + encodeURIComponent(data.doc_id) + '?token=' + encodeURIComponent(getAdminToken());
+            if (_audioTypes[reviewDocType]) {
+                html += '<div class="review-media-player"><audio controls preload="metadata" style="width:100%"><source src="' + escapeHtml(reviewMediaUrl) + '"></audio></div>';
+            } else {
+                html += '<div class="review-media-player"><video controls preload="metadata" style="width:100%;max-height:360px"><source src="' + escapeHtml(reviewMediaUrl) + '"></video></div>';
+            }
+        }
+
         var slideNum = 0;
         var chunkNum = 0;
         for (var i = 0; i < data.segments.length; i++) {
