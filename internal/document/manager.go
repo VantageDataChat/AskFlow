@@ -708,17 +708,17 @@ func (dm *DocumentManager) ListDocuments(productID string, includePublic bool) (
 	if productID != "" {
 		if includePublic {
 			rows, err = dm.db.Query(
-				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE product_id = ? OR product_id = '' ORDER BY created_at DESC`,
+				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE type != 'answer' AND (product_id = ? OR product_id = '') ORDER BY created_at DESC`,
 				productID,
 			)
 		} else {
 			rows, err = dm.db.Query(
-				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE product_id = ? ORDER BY created_at DESC`,
+				`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE type != 'answer' AND product_id = ? ORDER BY created_at DESC`,
 				productID,
 			)
 		}
 	} else {
-		rows, err = dm.db.Query(`SELECT id, name, type, status, error, created_at, product_id FROM documents ORDER BY created_at DESC`)
+		rows, err = dm.db.Query(`SELECT id, name, type, status, error, created_at, product_id FROM documents WHERE type != 'answer' ORDER BY created_at DESC`)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to query documents: %w", err)
@@ -746,6 +746,7 @@ func (dm *DocumentManager) ListDocuments(productID string, includePublic bool) (
 	}
 	return docs, nil
 }
+
 
 
 
