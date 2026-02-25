@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -84,6 +85,26 @@ func setupTestDB(t *testing.T) *sql.DB {
 			product_id    TEXT DEFAULT '',
 			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (document_id) REFERENCES documents(id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_users (
+			id            TEXT PRIMARY KEY,
+			username      TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			role          TEXT NOT NULL DEFAULT 'editor',
+			created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS admin_user_products (
+			admin_user_id TEXT NOT NULL,
+			product_id    TEXT NOT NULL,
+			PRIMARY KEY (admin_user_id, product_id),
+			FOREIGN KEY (admin_user_id) REFERENCES admin_users(id) ON DELETE CASCADE,
+			FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+		)`,
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id         TEXT PRIMARY KEY,
+			user_id    TEXT NOT NULL,
+			expires_at DATETIME NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 	}
 
@@ -212,10 +233,13 @@ func TestActivate_Approved(t *testing.T) {
 	}
 }
 
-func TestActivate_Pending(t *testing.T) {
+// TestActivate_AlwaysApproved verifies that Activate always approves directly
+// regardless of market server response (no-approval mode).
+func TestActivate_AlwaysApproved(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
+	// Even with a market server that would reject, Activate approves directly
 	srv := newTestMarketServer(false, "pending review")
 	defer srv.Close()
 
@@ -231,24 +255,21 @@ func TestActivate_Pending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Status != StatusPending {
-		t.Errorf("expected status %q, got %q", StatusPending, resp.Status)
+	if resp.Status != StatusApproved {
+		t.Errorf("expected status %q, got %q", StatusApproved, resp.Status)
 	}
-	if resp.ShopModuleProductID != "" {
-		t.Error("expected empty ShopModuleProductID for pending shop")
-	}
-	if resp.Message != "pending review" {
-		t.Errorf("expected message %q, got %q", "pending review", resp.Message)
+	if resp.ShopModuleProductID == "" {
+		t.Error("expected non-empty ShopModuleProductID for approved shop")
 	}
 
-	// Verify shop record in DB is pending
+	// Verify shop record in DB is approved
 	var dbStatus string
 	err = db.QueryRow("SELECT status FROM shops WHERE id = ?", resp.Shop.ID).Scan(&dbStatus)
 	if err != nil {
 		t.Fatalf("failed to query shop: %v", err)
 	}
-	if dbStatus != StatusPending {
-		t.Errorf("expected DB status %q, got %q", StatusPending, dbStatus)
+	if dbStatus != StatusApproved {
+		t.Errorf("expected DB status %q, got %q", StatusApproved, dbStatus)
 	}
 }
 
@@ -293,11 +314,13 @@ func TestActivate_DuplicateOwner(t *testing.T) {
 	}
 }
 
-func TestActivate_MarketServiceError(t *testing.T) {
+// TestActivate_SucceedsWithoutMarket verifies that Activate succeeds even when
+// the market service is unavailable (no-approval mode, market not called).
+func TestActivate_SucceedsWithoutMarket(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	// Market server that returns 500
+	// Market server that returns 500 — should not matter since Activate doesn't call it
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -306,14 +329,20 @@ func TestActivate_MarketServiceError(t *testing.T) {
 	parentID := seedParentProduct(t, db)
 	svc := NewShopService(db, db, NewMarketClient(srv.URL), product.NewProductService(db, db))
 
-	_, err := svc.Activate(ActivateRequest{
+	resp, err := svc.Activate(ActivateRequest{
 		OwnerID:         1,
 		SoftwareName:    "vantagics",
 		ShopName:        "my-shop",
 		ParentProductID: parentID,
 	})
-	if err == nil {
-		t.Fatal("expected error when market service fails")
+	if err != nil {
+		t.Fatalf("expected no error in no-approval mode, got: %v", err)
+	}
+	if resp.Status != StatusApproved {
+		t.Errorf("expected status %q, got %q", StatusApproved, resp.Status)
+	}
+	if resp.ShopModuleProductID == "" {
+		t.Error("expected non-empty ShopModuleProductID")
 	}
 }
 
@@ -426,14 +455,14 @@ func TestProperty_SoftwareNameInvariant(t *testing.T) {
 	})
 }
 
-// Feature: shop-support, Property 4: 有效开通请求创建待审批记录
-// Validates: Requirements 2.4
-func TestProperty_ValidActivationCreatesPendingRecord(t *testing.T) {
+// Feature: shop-support, Property 4: 有效开通请求直接审批
+// Validates: Requirements 2.4 (no-approval mode: always approved)
+func TestProperty_ValidActivationAlwaysApproved(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		// Market returns not-approved so the shop stays in pending state
+		// Market response is irrelevant — Activate always approves directly
 		srv := newTestMarketServer(false, "pending")
 		defer srv.Close()
 
@@ -457,42 +486,35 @@ func TestProperty_ValidActivationCreatesPendingRecord(t *testing.T) {
 			rt.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify response status is pending
-		if resp.Status != StatusPending {
-			rt.Fatalf("expected status %q, got %q", StatusPending, resp.Status)
+		// Verify response status is always approved (no-approval mode)
+		if resp.Status != StatusApproved {
+			rt.Fatalf("expected status %q, got %q", StatusApproved, resp.Status)
+		}
+		if resp.ShopModuleProductID == "" {
+			rt.Fatal("expected non-empty ShopModuleProductID for approved shop")
 		}
 
-		// Verify a record exists in shops table with status "pending"
+		// Verify a record exists in shops table with status "approved"
 		var shopStatus string
 		qErr := db.QueryRow("SELECT status FROM shops WHERE id = ?", resp.Shop.ID).Scan(&shopStatus)
 		if qErr != nil {
 			rt.Fatalf("failed to query shop record: %v", qErr)
 		}
-		if shopStatus != StatusPending {
-			rt.Fatalf("expected shop status %q in DB, got %q", StatusPending, shopStatus)
-		}
-
-		// Verify a record exists in shop_activation_requests table with status "pending"
-		var reqStatus string
-		qErr = db.QueryRow("SELECT status FROM shop_activation_requests WHERE shop_id = ?", resp.Shop.ID).Scan(&reqStatus)
-		if qErr != nil {
-			rt.Fatalf("failed to query activation request record: %v", qErr)
-		}
-		if reqStatus != StatusPending {
-			rt.Fatalf("expected activation request status %q in DB, got %q", StatusPending, reqStatus)
+		if shopStatus != StatusApproved {
+			rt.Fatalf("expected shop status %q in DB, got %q", StatusApproved, shopStatus)
 		}
 	})
 }
 
-// Feature: shop-support, Property 6: 开通状态与 Market 响应一致
-// Validates: Requirements 3.2, 3.3
-func TestProperty_ActivationStatusMatchesMarketResponse(t *testing.T) {
+// Feature: shop-support, Property 6: 直接审批模式下状态始终为 approved
+// Validates: No-approval mode — Market response is not consulted
+func TestProperty_ActivationAlwaysApproved(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		// Fresh DB per iteration
 		db := setupTestDB(t)
 		defer db.Close()
 
-		// Randomly decide whether Market approves or not
+		// Randomly decide whether Market would approve or not — should not matter
 		approved := rapid.Bool().Draw(rt, "market_approved")
 
 		srv := newTestMarketServer(approved, "market response")
@@ -515,44 +537,25 @@ func TestProperty_ActivationStatusMatchesMarketResponse(t *testing.T) {
 			rt.Fatalf("unexpected error: %v", err)
 		}
 
-		// Verify response status matches Market approval
-		if approved {
-			if resp.Status != StatusApproved {
-				rt.Fatalf("market approved=true but got status %q, expected %q", resp.Status, StatusApproved)
-			}
-			if resp.ShopModuleProductID == "" {
-				rt.Fatal("market approved=true but ShopModuleProductID is empty")
-			}
-		} else {
-			if resp.Status != StatusPending {
-				rt.Fatalf("market approved=false but got status %q, expected %q", resp.Status, StatusPending)
-			}
-			if resp.ShopModuleProductID != "" {
-				rt.Fatalf("market approved=false but ShopModuleProductID is %q, expected empty", resp.ShopModuleProductID)
-			}
+		// In no-approval mode, status is always approved regardless of market response
+		if resp.Status != StatusApproved {
+			rt.Fatalf("expected status %q, got %q", StatusApproved, resp.Status)
+		}
+		if resp.ShopModuleProductID == "" {
+			rt.Fatal("expected non-empty ShopModuleProductID")
 		}
 
-		// Verify DB record matches
+		// Verify DB record is always approved
 		var dbStatus, dbModuleID string
 		qErr := db.QueryRow("SELECT status, shop_module_product_id FROM shops WHERE id = ?", resp.Shop.ID).Scan(&dbStatus, &dbModuleID)
 		if qErr != nil {
 			rt.Fatalf("failed to query shop: %v", qErr)
 		}
-
-		if approved {
-			if dbStatus != StatusApproved {
-				rt.Fatalf("market approved=true but DB status is %q", dbStatus)
-			}
-			if dbModuleID == "" {
-				rt.Fatal("market approved=true but DB shop_module_product_id is empty")
-			}
-		} else {
-			if dbStatus != StatusPending {
-				rt.Fatalf("market approved=false but DB status is %q", dbStatus)
-			}
-			if dbModuleID != "" {
-				rt.Fatalf("market approved=false but DB shop_module_product_id is %q", dbModuleID)
-			}
+		if dbStatus != StatusApproved {
+			rt.Fatalf("expected DB status %q, got %q", StatusApproved, dbStatus)
+		}
+		if dbModuleID == "" {
+			rt.Fatal("expected non-empty DB shop_module_product_id")
 		}
 	})
 }
@@ -571,8 +574,9 @@ func TestProperty_DescriptionPreservedAsWelcomeMessage(t *testing.T) {
 		parentID := seedParentProduct(t, db)
 		svc := NewShopService(db, db, NewMarketClient(srv.URL), product.NewProductService(db, db))
 
-		// Generate a non-empty description (at least 1 visible character)
-		description := rapid.StringMatching(`[a-zA-Z0-9][a-zA-Z0-9 ]{0,49}`).Draw(rt, "description")
+		// Generate a non-empty description (at least 1 visible character, no leading/trailing spaces
+		// since Activate trims the description)
+		description := rapid.StringMatching(`[a-zA-Z0-9][a-zA-Z0-9]{0,49}`).Draw(rt, "description")
 		shopName := rapid.StringMatching(`[a-zA-Z][a-zA-Z0-9]{0,9}`).Draw(rt, "shop_name")
 		ownerID := rapid.Int64Range(1, 1<<53).Draw(rt, "owner_id")
 
@@ -600,9 +604,10 @@ func TestProperty_DescriptionPreservedAsWelcomeMessage(t *testing.T) {
 			rt.Fatalf("failed to query child product welcome_message: %v", qErr)
 		}
 
-		// The welcome_message must exactly match the original description
-		if welcomeMsg != description {
-			rt.Fatalf("welcome_message mismatch: expected %q, got %q", description, welcomeMsg)
+		// The welcome_message must match the trimmed description
+		trimmedDesc := strings.TrimSpace(description)
+		if welcomeMsg != trimmedDesc {
+			rt.Fatalf("welcome_message mismatch: expected %q, got %q", trimmedDesc, welcomeMsg)
 		}
 	})
 }
@@ -882,14 +887,14 @@ func TestDelete_NotFound(t *testing.T) {
 		t.Fatal("expected error for nonexistent shop, got nil")
 	}
 }
-// Feature: shop-support, Property 7: 支持模块存在当且仅当店铺已批准
-// Validates: Requirements 4.1, 4.3
-func TestProperty_ModuleExistsIffApproved(t *testing.T) {
+// Feature: shop-support, Property 7: 直接审批模式下支持模块始终存在
+// Validates: Requirements 4.1, 4.3 (no-approval mode: always approved with module)
+func TestProperty_ModuleAlwaysExistsInNoApprovalMode(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		db := setupTestDB(t)
 		defer db.Close()
 
-		// Randomly decide whether Market approves or not
+		// Market response is irrelevant in no-approval mode
 		approved := rapid.Bool().Draw(rt, "market_approved")
 
 		srv := newTestMarketServer(approved, "market response")
@@ -919,27 +924,22 @@ func TestProperty_ModuleExistsIffApproved(t *testing.T) {
 			rt.Fatalf("failed to query shop: %v", qErr)
 		}
 
-		if dbStatus == StatusApproved {
-			// Approved shop MUST have a non-empty shop_module_product_id
-			if dbModuleProductID == "" {
-				rt.Fatal("approved shop has empty shop_module_product_id")
-			}
-			// A matching product record MUST exist in the products table
-			var productCount int
-			qErr = db.QueryRow("SELECT COUNT(*) FROM products WHERE id = ?", dbModuleProductID).Scan(&productCount)
-			if qErr != nil {
-				rt.Fatalf("failed to query products table: %v", qErr)
-			}
-			if productCount != 1 {
-				rt.Fatalf("expected exactly 1 product for shop_module_product_id=%q, got %d", dbModuleProductID, productCount)
-			}
-		} else if dbStatus == StatusPending {
-			// Pending shop MUST have an empty shop_module_product_id
-			if dbModuleProductID != "" {
-				rt.Fatalf("pending shop has non-empty shop_module_product_id=%q", dbModuleProductID)
-			}
-		} else {
-			rt.Fatalf("unexpected shop status: %q", dbStatus)
+		// In no-approval mode, shop is always approved with a module product
+		if dbStatus != StatusApproved {
+			rt.Fatalf("expected status %q, got %q", StatusApproved, dbStatus)
+		}
+		if dbModuleProductID == "" {
+			rt.Fatal("approved shop has empty shop_module_product_id")
+		}
+
+		// A matching product record MUST exist in the products table
+		var productCount int
+		qErr = db.QueryRow("SELECT COUNT(*) FROM products WHERE id = ?", dbModuleProductID).Scan(&productCount)
+		if qErr != nil {
+			rt.Fatalf("failed to query products table: %v", qErr)
+		}
+		if productCount != 1 {
+			rt.Fatalf("expected exactly 1 product for shop_module_product_id=%q, got %d", dbModuleProductID, productCount)
 		}
 	})
 }
