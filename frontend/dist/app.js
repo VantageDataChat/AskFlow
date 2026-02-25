@@ -6010,13 +6010,14 @@
 
     // Admin FAQ management
     function loadFAQAdminProductSelector() {
-        adminFetch('/api/products?exclude_shop=1')
+        var isStore = isStoreOwnerSession();
+        var url = isStore ? '/api/products' : '/api/products?exclude_shop=1';
+        adminFetch(url)
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 var sel = document.getElementById('faq-admin-product-select');
                 if (!sel) return;
                 var products = data.products || [];
-                var isStore = isStoreOwnerSession();
                 sel.innerHTML = '';
                 for (var i = 0; i < products.length; i++) {
                     var opt = document.createElement('option');
