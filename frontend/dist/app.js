@@ -840,12 +840,26 @@
             });
     };
 
+    // --- Clear all shop/store identity from localStorage ---
+    function clearShopContext() {
+        localStorage.removeItem('askflow_store_context');
+        localStorage.removeItem('askflow_customer_store');
+        localStorage.removeItem('askflow_shop_product_mode');
+        localStorage.removeItem('askflow_product_id');
+        localStorage.removeItem('askflow_product_name');
+    }
+
     // --- Frontend Anonymous Login ---
     window.handleAnonymousFrontendLogin = function () {
         var btn = document.getElementById('anonymous-frontend-login-btn');
         if (btn) btn.disabled = true;
         var errorEl = document.getElementById('user-login-error');
         if (errorEl) errorEl.classList.add('hidden');
+
+        // Clear any previous shop/store identity so anonymous access is isolated
+        clearShopContext();
+        clearSession();
+        clearAdminSession();
 
         fetch('/api/auth/anonymous-login', {
             method: 'POST',
@@ -4815,6 +4829,11 @@
         // Clean the URL immediately so the ticket isn't visible/reusable
         window.history.replaceState({}, '', '/');
 
+        // Clear previous identity so scope switches are isolated
+        clearShopContext();
+        clearSession();
+        clearAdminSession();
+
         var body = { ticket: ticket };
         if (scope) body.scope = scope;
         if (storeID) body.store_id = parseInt(storeID, 10) || 0;
@@ -5796,13 +5815,12 @@
     window.logout = function () {
         chatMessages = [];
         chatLoading = false;
-        localStorage.removeItem('askflow_product_id');
-        localStorage.removeItem('askflow_product_name');
-        localStorage.removeItem('askflow_shop_product_mode');
+        clearShopContext();
         cachedProducts = null;
         _productFetchPromise = null;
         _productFetchMode = null;
         clearSession();
+        clearAdminSession();
         navigate('/login');
     };
 
