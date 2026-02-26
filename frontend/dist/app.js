@@ -5880,17 +5880,18 @@
         var hash = window.location.hash;
         if (hash !== '#anonymous') return Promise.resolve(false);
 
-        // Already logged in — just clear hash and continue normally
-        if (getSession()) {
-            history.replaceState(null, '', window.location.pathname + window.location.search);
-            return Promise.resolve(false);
-        }
-
         // Anonymous frontend must be enabled (already fetched by init's p2)
         if (!anonymousFrontendEnabled) {
             history.replaceState(null, '', window.location.pathname + window.location.search);
             return Promise.resolve(false);
         }
+
+        // Clear any previous shop/store identity and session so anonymous
+        // access is fully isolated — even if the user was previously logged
+        // in through a shop's customer service system.
+        clearShopContext();
+        clearSession();
+        clearAdminSession();
 
         // Perform anonymous login
         return fetch('/api/auth/anonymous-login', {
@@ -5959,8 +5960,10 @@
 
         // Pre-warm product cache early (used by login page and chat page).
         // If this is a returning market customer, use their shop product mode.
+        // Skip shop mode when #anonymous is present — we're about to clear it.
         var savedMode = localStorage.getItem('askflow_shop_product_mode');
-        fetchProducts(savedMode || 'default');
+        var isAnonymousEntry = window.location.hash === '#anonymous';
+        fetchProducts((savedMode && !isAnonymousEntry) ? savedMode : 'default');
 
         // Fetch app-info in parallel (non-blocking, doesn't affect routing)
         fetch('/api/app-info')
