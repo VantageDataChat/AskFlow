@@ -56,13 +56,22 @@ if %errorlevel% neq 0 (
 echo        Build OK
 echo.
 
-echo [3.5/4] Packaging built artifacts on server...
+echo [4/7] Restarting service...
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "chmod +x %REMOTE_DIR%/start.sh && bash %REMOTE_DIR%/start.sh"
+echo.
+
+echo [5/7] Configuring ffmpeg in config.json...
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\"ffmpeg_path\": \"[^\"]*\"/\"ffmpeg_path\": \"\/usr\/bin\/ffmpeg\"/' %REMOTE_DIR%/data/config.json 2>/dev/null && echo '  Config updated'"
+echo.
+
+echo [6/7] Removing nginx cache headers...
+%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i '/# 禁用缓存/,/expires -1;/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; sed -i '/add_header Cache-Control.*no-store/d; /add_header Pragma.*no-cache/d; /add_header Expires.*0/d; /proxy_no_cache/d; /proxy_cache_bypass/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; nginx -t && systemctl reload nginx && echo '  Nginx cache disabled'"
+echo.
+
+echo [7/7] Packaging and downloading release...
 set RELEASE_NAME=askflow_release_linux.tar.gz
 %SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "cd %REMOTE_DIR% && tar -czf %RELEASE_NAME% %BINARY_NAME% frontend"
 echo        Package OK
-echo.
-
-echo [3.6/4] Downloading release package to local...
 if exist %RELEASE_NAME% del /f %RELEASE_NAME%
 %SSHPASS% -p %PASS% scp -o StrictHostKeyChecking=accept-new -q %USER%@%SERVER%:%REMOTE_DIR%/%RELEASE_NAME% .
 if %errorlevel% neq 0 (
@@ -70,18 +79,6 @@ if %errorlevel% neq 0 (
 ) else (
     echo        Download OK: %RELEASE_NAME%
 )
-echo.
-
-echo [4/4] Restarting service...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "chmod +x %REMOTE_DIR%/start.sh && bash %REMOTE_DIR%/start.sh"
-echo.
-
-echo [5/6] Configuring ffmpeg in config.json...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i 's/\"ffmpeg_path\": \"[^\"]*\"/\"ffmpeg_path\": \"\/usr\/bin\/ffmpeg\"/' %REMOTE_DIR%/data/config.json 2>/dev/null && echo '  Config updated'"
-echo.
-
-echo [6/6] Removing nginx cache headers...
-%SSHPASS% -p %PASS% ssh -o StrictHostKeyChecking=accept-new %USER%@%SERVER% "sed -i '/# 禁用缓存/,/expires -1;/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; sed -i '/add_header Cache-Control.*no-store/d; /add_header Pragma.*no-cache/d; /add_header Expires.*0/d; /proxy_no_cache/d; /proxy_cache_bypass/d' /etc/nginx/conf.d/vantagedata.chat.conf 2>/dev/null; nginx -t && systemctl reload nginx && echo '  Nginx cache disabled'"
 echo.
 
 REM --- Cleanup ---
