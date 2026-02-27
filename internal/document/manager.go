@@ -429,10 +429,17 @@ func resizeImageForOCR(imgData []byte) []byte {
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 
+	// Release source image memory
+	src = nil
+
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
 		return imgData // encode failed → send original
 	}
+	
+	// Release destination image memory
+	dst = nil
+	
 	return buf.Bytes()
 }
 
@@ -483,10 +490,17 @@ func resizeImageForEmbedding(imgData []byte) []byte {
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.BiLinear.Scale(dst, dst.Bounds(), src, bounds, draw.Over, nil)
 
+	// Release source image memory
+	src = nil
+
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 85}); err != nil {
 		return nil
 	}
+	
+	// Release destination image memory
+	dst = nil
+	
 	return buf.Bytes()
 }
 
@@ -1690,6 +1704,9 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 					imageURLMap[cid] = url
 				}
 			}
+			if err := imgRows.Err(); err != nil {
+				log.Printf("Warning: error iterating image rows: %v", err)
+			}
 		}
 	}
 
@@ -1724,6 +1741,9 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 					Content: text,
 				})
 			}
+			if err := ocrRows.Err(); err != nil {
+				log.Printf("Warning: error iterating OCR rows: %v", err)
+			}
 		}
 	}
 
@@ -1745,6 +1765,9 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 					Type:    "transcript",
 					Content: text,
 				})
+			}
+			if err := audioRows.Err(); err != nil {
+				log.Printf("Warning: error iterating audio rows: %v", err)
 			}
 		}
 	}
@@ -1769,6 +1792,9 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 					Content:  text,
 					ImageURL: imgURL,
 				})
+			}
+			if err := slideRows.Err(); err != nil {
+				log.Printf("Warning: error iterating slide rows: %v", err)
 			}
 		}
 	}
@@ -1798,6 +1824,9 @@ func (dm *DocumentManager) GetDocumentReview(docID string) (*ReviewData, error) 
 					Content:  text,
 					ImageURL: imgURL,
 				})
+			}
+			if err := chunkRows.Err(); err != nil {
+				log.Printf("Warning: error iterating chunk rows: %v", err)
 			}
 		}
 	}
