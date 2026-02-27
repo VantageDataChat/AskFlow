@@ -2475,6 +2475,16 @@
 
                                         <span class="admin-form-hint" data-i18n="admin_multimodal_scene_threshold_hint">场景变化检测的敏感度（0-1），值越大越严格，只在画面发生实质性改变时提取关键帧，默认 0.3</span>
 
+                                        <div class="admin-form-hint" style="margin-top: 0.5rem; padding: 0.75rem; background: #f7fafc; border-left: 3px solid #4299e1; border-radius: 4px;">
+                                            <div style="font-weight: 600; margin-bottom: 0.5rem; color: #2d3748;" data-i18n="admin_multimodal_scene_threshold_recommendations">💡 阈值建议：</div>
+                                            <div style="line-height: 1.6; color: #4a5568;">
+                                                <div><strong>0.1-0.2:</strong> <span data-i18n="admin_multimodal_scene_rec_static">静态视频（讲座、演示）</span></div>
+                                                <div><strong>0.3:</strong> <span data-i18n="admin_multimodal_scene_rec_general">通用场景（默认）</span></div>
+                                                <div><strong>0.4-0.5:</strong> <span data-i18n="admin_multimodal_scene_rec_dynamic">动态视频（电影、动画）</span></div>
+                                                <div><strong>0.6+:</strong> <span data-i18n="admin_multimodal_scene_rec_extreme">极度动态视频</span></div>
+                                            </div>
+                                        </div>
+
                                     </div>
 
                                     <div class="admin-form-row">
