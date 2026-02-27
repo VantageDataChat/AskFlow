@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -30,7 +31,9 @@ func verifySudoPassword(password string) error {
 	}
 	go func() {
 		defer stdinPipe.Close()
-		io.WriteString(stdinPipe, password+"\n")
+		if _, err := io.WriteString(stdinPipe, password+"\n"); err != nil {
+			log.Printf("[verifySudoPassword] failed to write password to stdin: %v", err)
+		}
 	}()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("sudo authentication failed: %w", err)

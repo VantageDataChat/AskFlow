@@ -178,10 +178,12 @@ func (s *Service) findSimilarByEmbedding(productID, question string) string {
 		}
 		// Cache the embedding for future use
 		if embJSON, err := json.Marshal(entryVec); err == nil {
-			s.writeDB.Exec(
+			if _, execErr := s.writeDB.Exec(
 				`UPDATE faq_entries SET embedding = ? WHERE id = ?`,
 				string(embJSON), id,
-			)
+			); execErr != nil {
+				log.Printf("[FAQ] failed to cache embedding for entry %s: %v", id, execErr)
+			}
 		}
 
 		score := s.similarFn(queryVec, entryVec)
