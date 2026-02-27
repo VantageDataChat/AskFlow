@@ -844,6 +844,7 @@
     function clearShopContext() {
         localStorage.removeItem('askflow_store_context');
         localStorage.removeItem('askflow_customer_store');
+        localStorage.removeItem('askflow_customer_store_ctx');
         localStorage.removeItem('askflow_shop_product_mode');
         localStorage.removeItem('askflow_product_id');
         localStorage.removeItem('askflow_product_name');
@@ -1084,6 +1085,14 @@
                     if (customerStore.product) {
                         localStorage.setItem('askflow_product_name', customerStore.product);
                     }
+                }
+                // Persist store context for iframe expand (new window) feature
+                if (customerStore.scope === 'customer' && customerStore.store_id) {
+                    localStorage.setItem('askflow_customer_store_ctx', JSON.stringify({
+                        scope: customerStore.scope,
+                        store_id: customerStore.store_id,
+                        product: customerStore.product || ''
+                    }));
                 }
             } catch (e) { /* ignore */ }
             localStorage.removeItem('askflow_customer_store');
@@ -6267,8 +6276,9 @@
                 return;
             }
             // Build the full URL with the new ticket and the current store context
+            // Use askflow_customer_store_ctx (persisted) instead of askflow_customer_store (deleted after login)
             var storeCtx = null;
-            try { storeCtx = JSON.parse(localStorage.getItem('askflow_customer_store') || 'null'); } catch (e) {}
+            try { storeCtx = JSON.parse(localStorage.getItem('askflow_customer_store_ctx') || 'null'); } catch (e) {}
             var url = window.location.origin + '/auth/ticket-login?ticket=' + encodeURIComponent(data.ticket);
             if (storeCtx && storeCtx.scope === 'customer' && storeCtx.store_id) {
                 url += '&scope=customer&store_id=' + storeCtx.store_id;
