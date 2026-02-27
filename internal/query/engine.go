@@ -120,17 +120,28 @@ func (ec *embeddingCache) get(text string) ([]float64, bool) {
 func (ec *embeddingCache) put(text string, vector []float64) {
 	ec.mu.Lock()
 	defer ec.mu.Unlock()
-	if _, ok := ec.entries[text]; !ok {
-		if ec.count >= ec.maxSize {
-			evictIdx := (ec.head - ec.count + ec.maxSize) % ec.maxSize
-			delete(ec.entries, ec.ring[evictIdx])
-		} else {
-			ec.count++
-		}
-		ec.ring[ec.head] = text
-		ec.head = (ec.head + 1) % ec.maxSize
+	
+	// If key already exists, just update the entry
+	if _, ok := ec.entries[text]; ok {
+		ec.entries[text] = embeddingCacheEntry{vector: vector, timestamp: time.Now()}
+		return
 	}
+	
+	// Evict oldest entry if cache is full
+	if ec.count >= ec.maxSize {
+		evictIdx := ec.head
+		oldKey := ec.ring[evictIdx]
+		if oldKey != "" {
+			delete(ec.entries, oldKey)
+		}
+	} else {
+		ec.count++
+	}
+	
+	// Add new entry
+	ec.ring[ec.head] = text
 	ec.entries[text] = embeddingCacheEntry{vector: vector, timestamp: time.Now()}
+	ec.head = (ec.head + 1) % ec.maxSize
 }
 
 // QueryEngine orchestrates the RAG query flow: embed → search → LLM generate or pending.

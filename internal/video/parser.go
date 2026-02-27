@@ -387,7 +387,8 @@ func (p *Parser) Transcribe(audioPath string) ([]TranscriptSegment, error) {
 	}, nil
 }
 
-// ExtractKeyframes 调用 ffmpeg 按 KeyframeInterval 间隔从视频中提取关键帧图像
+// ExtractKeyframes 调用 ffmpeg 使用场景切换检测提取关键帧图像
+// 使用 select='gt(scene,0.3)' 参数进行场景切换检测，只在画面发生实质性改变时抽取一帧
 func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, error) {
 	if p.FFmpegPath == "" {
 		return nil, fmt.Errorf("ffmpeg 路径未配置")
@@ -399,10 +400,14 @@ func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, erro
 		}
 	}
 
+	// 使用场景切换检测提取关键帧，并记录时间戳
+	// select='gt(scene,0.3)' 表示场景变化阈值为0.3（0-1之间，值越大越严格）
+	// showinfo 过滤器用于输出每帧的时间戳信息
 	outputPattern := filepath.Join(outputDir, "frame_%04d.jpg")
 	cmd := exec.Command(p.FFmpegPath,
 		"-i", videoPath,
-		"-vf", fmt.Sprintf("fps=1/%d", p.KeyframeInterval),
+		"-vf", "select='gt(scene,0.3)',showinfo",
+		"-vsync", "vfr",
 		"-q:v", "2",
 		outputPattern,
 	)
@@ -410,6 +415,9 @@ func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, erro
 	if err != nil {
 		return nil, fmt.Errorf("ffmpeg 关键帧提取失败: %s: %w", strings.TrimSpace(string(output)), err)
 	}
+
+	// 解析 showinfo 输出获取每帧的时间戳
+	timestamps := parseShowinfoTimestamps(string(output))
 
 	// Scan output directory for generated frame files
 	entries, err := os.ReadDir(outputDir)
@@ -424,26 +432,57 @@ func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, erro
 		}
 	}
 
-	// If no frames extracted (video shorter than keyframe interval), extract one frame from the middle
+	// If no frames extracted (scene detection too strict or video too short), fallback to interval-based extraction
 	if len(frameFiles) == 0 {
 		duration := p.ProbeDuration(videoPath)
-		seekTime := duration / 2
-		if seekTime < 0 {
-			seekTime = 0
+		// 如果场景检测没有提取到帧，回退到固定间隔模式
+		if duration > 0 {
+			// 使用固定间隔作为回退方案
+			fallbackCmd := exec.Command(p.FFmpegPath,
+				"-i", videoPath,
+				"-vf", fmt.Sprintf("fps=1/%d", p.KeyframeInterval),
+				"-q:v", "2",
+				outputPattern,
+			)
+			if fbOut, fbErr := fallbackCmd.CombinedOutput(); fbErr == nil {
+				// 重新扫描目录
+				entries, _ = os.ReadDir(outputDir)
+				frameFiles = nil
+				for _, entry := range entries {
+					if !entry.IsDir() && strings.HasPrefix(entry.Name(), "frame_") && strings.HasSuffix(entry.Name(), ".jpg") {
+						frameFiles = append(frameFiles, entry.Name())
+					}
+				}
+				// 使用固定间隔计算时间戳
+				timestamps = make([]float64, len(frameFiles))
+				for i := range timestamps {
+					timestamps[i] = float64(i * p.KeyframeInterval)
+				}
+			} else {
+				_ = fbOut
+			}
 		}
-		singleFrame := filepath.Join(outputDir, "frame_0001.jpg")
-		fallbackCmd := exec.Command(p.FFmpegPath,
-			"-ss", fmt.Sprintf("%.2f", seekTime),
-			"-i", videoPath,
-			"-frames:v", "1",
-			"-q:v", "2",
-			singleFrame,
-		)
-		if fbOut, fbErr := fallbackCmd.CombinedOutput(); fbErr == nil {
-			frameFiles = append(frameFiles, "frame_0001.jpg")
-		} else {
-			// Log but don't fail — video may have no video stream
-			_ = fbOut
+		
+		// 如果仍然没有帧，提取中间帧
+		if len(frameFiles) == 0 {
+			seekTime := duration / 2
+			if seekTime < 0 {
+				seekTime = 0
+			}
+			singleFrame := filepath.Join(outputDir, "frame_0001.jpg")
+			fallbackCmd := exec.Command(p.FFmpegPath,
+				"-ss", fmt.Sprintf("%.2f", seekTime),
+				"-i", videoPath,
+				"-frames:v", "1",
+				"-q:v", "2",
+				singleFrame,
+			)
+			if fbOut, fbErr := fallbackCmd.CombinedOutput(); fbErr == nil {
+				frameFiles = append(frameFiles, "frame_0001.jpg")
+				timestamps = []float64{seekTime}
+			} else {
+				_ = fbOut
+			}
 		}
 	}
 
@@ -451,13 +490,51 @@ func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, erro
 
 	keyframes := make([]Keyframe, 0, len(frameFiles))
 	for i, name := range frameFiles {
+		timestamp := float64(i * p.KeyframeInterval) // 默认值
+		if i < len(timestamps) {
+			timestamp = timestamps[i]
+		}
 		keyframes = append(keyframes, Keyframe{
-			Timestamp: float64(i * p.KeyframeInterval),
+			Timestamp: timestamp,
 			FilePath:  filepath.Join(outputDir, name),
 		})
 	}
 
 	return keyframes, nil
+}
+
+// parseShowinfoTimestamps 从 ffmpeg showinfo 过滤器的输出中解析时间戳
+// showinfo 输出格式示例: [Parsed_showinfo_1 @ 0x...] n:0 pts:0 pts_time:0.000000 ...
+func parseShowinfoTimestamps(output string) []float64 {
+	var timestamps []float64
+	lines := strings.Split(output, "\n")
+	
+	for _, line := range lines {
+		// 查找包含 pts_time 的行
+		if !strings.Contains(line, "pts_time:") {
+			continue
+		}
+		
+		// 提取 pts_time 值
+		idx := strings.Index(line, "pts_time:")
+		if idx < 0 {
+			continue
+		}
+		
+		timeStr := line[idx+9:] // 跳过 "pts_time:"
+		// 找到时间值的结束位置（空格或行尾）
+		endIdx := strings.IndexAny(timeStr, " \t\r\n")
+		if endIdx > 0 {
+			timeStr = timeStr[:endIdx]
+		}
+		
+		var timestamp float64
+		if _, err := fmt.Sscanf(timeStr, "%f", &timestamp); err == nil {
+			timestamps = append(timestamps, timestamp)
+		}
+	}
+	
+	return timestamps
 }
 
 // ProbeDuration 调用 ffmpeg 获取视频时长（秒）。

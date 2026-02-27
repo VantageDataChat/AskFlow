@@ -107,21 +107,22 @@ func (sm *SessionManager) ValidateSession(sessionID string) (*Session, error) {
 
 	// Check cache first
 	if s, ok := sm.cacheGet(sessionID); ok {
-		// Re-validate expiry on cached session
-		if time.Now().UTC().After(s.ExpiresAt) {
+		now := time.Now().UTC()
+		// Atomically check expiry to avoid TOCTOU race
+		if now.After(s.ExpiresAt) {
 			sm.cacheDelete(sessionID)
 			return nil, fmt.Errorf("session expired")
 		}
 		const maxSessionAge = 7 * 24 * time.Hour
-		if time.Now().UTC().Sub(s.CreatedAt) > maxSessionAge {
+		if now.Sub(s.CreatedAt) > maxSessionAge {
 			sm.cacheDelete(sessionID)
 			sm.writeDB.Exec("DELETE FROM sessions WHERE id = ?", sessionID)
 			return nil, fmt.Errorf("session expired (max age)")
 		}
 		// Sliding window: extend session expiry on each successful validation
-		remaining := time.Until(s.ExpiresAt)
+		remaining := s.ExpiresAt.Sub(now)
 		if remaining < sm.expiry/2 {
-			newExpiry := time.Now().UTC().Add(sm.expiry)
+			newExpiry := now.Add(sm.expiry)
 			sm.writeDB.Exec("UPDATE sessions SET expires_at = ? WHERE id = ?",
 				newExpiry.Format(time.RFC3339), sessionID)
 			s.ExpiresAt = newExpiry

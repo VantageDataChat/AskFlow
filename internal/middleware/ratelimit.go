@@ -67,19 +67,26 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
-	// Prevent memory exhaustion: if too many unique IPs, force cleanup
+	// Prevent memory exhaustion: if too many unique IPs, remove oldest entries
 	if len(rl.requests) > 100000 {
-		for k := range rl.requests {
-			delete(rl.requests, k)
-			if len(rl.requests) <= 50000 {
-				break
+		// Find and remove IPs with no recent requests
+		toDelete := make([]string, 0, 50000)
+		for k, times := range rl.requests {
+			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
+				toDelete = append(toDelete, k)
+				if len(toDelete) >= 50000 {
+					break
+				}
 			}
+		}
+		for _, k := range toDelete {
+			delete(rl.requests, k)
 		}
 	}
 
-	// Filter out expired entries
+	// Filter out expired entries for this IP
 	times := rl.requests[ip]
-	valid := times[:0]
+	valid := make([]time.Time, 0, len(times))
 	for _, t := range times {
 		if t.After(cutoff) {
 			valid = append(valid, t)

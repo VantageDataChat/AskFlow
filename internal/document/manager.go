@@ -276,7 +276,7 @@ func NewDocumentManager(
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-					// Resolve DNS and validate the IP before connecting (DNS rebinding protection)
+					// Resolve DNS and validate ALL IPs before connecting (DNS rebinding protection)
 					host, port, err := net.SplitHostPort(addr)
 					if err != nil {
 						return nil, err
@@ -285,13 +285,24 @@ func NewDocumentManager(
 					if err != nil {
 						return nil, err
 					}
+					if len(ips) == 0 {
+						return nil, fmt.Errorf("no IP addresses found for host: %s", host)
+					}
+					// Validate ALL resolved IPs to prevent DNS rebinding attacks
+					var validIP *net.IPAddr
 					for _, ip := range ips {
 						if ip.IP.IsLoopback() || ip.IP.IsPrivate() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsUnspecified() {
 							return nil, fmt.Errorf("DNS resolved to blocked IP: %s", ip.IP)
 						}
+						if validIP == nil {
+							validIP = &ip
+						}
+					}
+					if validIP == nil {
+						return nil, fmt.Errorf("no valid IP addresses found for host: %s", host)
 					}
 					dialer := &net.Dialer{Timeout: 10 * time.Second}
-					return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+					return dialer.DialContext(ctx, network, net.JoinHostPort(validIP.IP.String(), port))
 				},
 			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -897,7 +908,9 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 					sb.WriteString(t)
 				}
 				hash := contentHash(sb.String())
-				dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
+				if _, err := dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID); err != nil {
+					log.Printf("Warning: failed to update content_hash for doc=%s: %v", docID, err)
+				}
 
 				stats := &ImportStats{
 					TextChars:  totalChars,
@@ -922,7 +935,9 @@ func (dm *DocumentManager) processFile(docID, docName string, fileData []byte, f
 			return nil, fmt.Errorf("文档内容重复，与已有文档相同")
 		}
 		// Store the content hash for future dedup checks
-		dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
+		if _, err := dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID); err != nil {
+			log.Printf("Warning: failed to update content_hash for doc=%s: %v", docID, err)
+		}
 	}
 
 	// For PPT: store each slide as a text chunk with its rendered image.
@@ -1296,7 +1311,9 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) (*Imp
 			if existingID := dm.findDocumentByContentHash(hash); existingID != "" {
 				return nil, fmt.Errorf("文档内容重复，与已有文档相同")
 			}
-			dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
+			if _, err := dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID); err != nil {
+				log.Printf("Warning: failed to update content_hash for doc=%s: %v", docID, err)
+			}
 		}
 		if result.Text != "" {
 			if err := dm.chunkEmbedStore(docID, url, result.Text, productID); err != nil {
@@ -1340,7 +1357,9 @@ func (dm *DocumentManager) processURL(docID, url string, productID string) (*Imp
 	if existingID := dm.findDocumentByContentHash(hash); existingID != "" {
 		return nil, fmt.Errorf("文档内容重复，与已有文档相同")
 	}
-	dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID)
+	if _, err := dm.db.Exec(`UPDATE documents SET content_hash = ? WHERE id = ?`, hash, docID); err != nil {
+		log.Printf("Warning: failed to update content_hash for doc=%s: %v", docID, err)
+	}
 
 	if err := dm.chunkEmbedStore(docID, url, text, productID); err != nil {
 		return nil, err

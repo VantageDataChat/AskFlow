@@ -477,8 +477,9 @@ func Restore(archivePath, targetDir string) error {
 
 		target := filepath.Join(targetDir, filepath.FromSlash(header.Name))
 
-		// Security: prevent path traversal
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(targetDir)) {
+		// Security: prevent path traversal using filepath.Rel
+		relPath, err := filepath.Rel(targetDir, target)
+		if err != nil || strings.HasPrefix(relPath, "..") || filepath.IsAbs(relPath) {
 			return fmt.Errorf("非法路径: %s", header.Name)
 		}
 
