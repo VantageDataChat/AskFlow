@@ -77,6 +77,8 @@ func Register(app *handler.App) func() {
 	// SN login and ticket exchange are called by Market — no rate limit.
 	http.HandleFunc("/api/auth/sn-login", secure(handler.HandleSNLogin(app)))
 	http.HandleFunc("/api/auth/ticket-exchange", secure(handler.HandleTicketExchange(app)))
+	// Reissue-ticket is called from the iframe by an authenticated user — rate limit to prevent abuse.
+	http.HandleFunc("/api/auth/reissue-ticket", secureRL(handler.HandleReissueTicket(app)))
 	http.HandleFunc("/auth/ticket-login", secure(handler.HandleTicketLogin(app)))
 	http.HandleFunc("/api/captcha", secure(handler.HandleCaptcha()))
 	http.HandleFunc("/api/captcha/image", secureRL(handler.HandleCaptchaImage()))

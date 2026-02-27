@@ -6231,6 +6231,56 @@
         init();
     }
 
+    // --- Iframe expand (popout) support ---
+    // When this page is loaded inside an iframe (e.g. Marketplace store support widget),
+    // the parent window can request a fresh ticket to open the service portal in a new tab.
+    // This avoids the "ticket_already_used" error that occurs when reusing the original URL.
+    window.addEventListener('message', function (event) {
+        if (!event.data || event.data.type !== 'askflow-request-expand-url') return;
+        // Only respond when running inside an iframe
+        if (window === window.top) return;
+
+        var source = event.source;
+        var origin = event.origin;
+        function reply(msg) {
+            if (source) source.postMessage(msg, origin || '*');
+        }
+
+        var session = getSession();
+        if (!session) {
+            reply({ type: 'askflow-expand-url', error: 'no_session' });
+            return;
+        }
+
+        var token = session.id || session.session_id || '';
+        fetch('/api/auth/reissue-ticket', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            }
+        })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            if (!data.success || !data.ticket) {
+                reply({ type: 'askflow-expand-url', error: data.message || 'reissue_failed' });
+                return;
+            }
+            // Build the full URL with the new ticket and the current store context
+            var storeCtx = null;
+            try { storeCtx = JSON.parse(localStorage.getItem('askflow_customer_store') || 'null'); } catch (e) {}
+            var url = window.location.origin + '/auth/ticket-login?ticket=' + encodeURIComponent(data.ticket);
+            if (storeCtx && storeCtx.scope === 'customer' && storeCtx.store_id) {
+                url += '&scope=customer&store_id=' + storeCtx.store_id;
+                if (storeCtx.product) url += '&product=' + encodeURIComponent(storeCtx.product);
+            }
+            reply({ type: 'askflow-expand-url', url: url });
+        })
+        .catch(function () {
+            reply({ type: 'askflow-expand-url', error: 'network_error' });
+        });
+    });
+
     // --- FAQ Feature ---
 
     // Chat FAQ panel

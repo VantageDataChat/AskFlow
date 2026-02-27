@@ -709,3 +709,40 @@ func handlePlainScope(w http.ResponseWriter, app *App, ti *TicketInfo) {
 		},
 	})
 }
+
+// HandleReissueTicket handles POST /api/auth/reissue-ticket — creates a new
+// one-time login ticket for the currently authenticated SN user.
+// This is used by the iframe "expand" button: the iframe already has a valid
+// session, but opening a new browser tab requires a fresh ticket because the
+// original ticket was consumed when the iframe loaded.
+func HandleReissueTicket(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		userID, err := GetUserSession(app, r)
+		if err != nil {
+			WriteJSON(w, http.StatusUnauthorized, map[string]interface{}{
+				"success": false, "message": "未登录",
+			})
+			return
+		}
+
+		ticket, err := app.ReissueTicketFromSession(userID)
+		if err != nil {
+			log.Printf("[ReissueTicket] failed for user_id=%s: %v", userID, err)
+			WriteJSON(w, http.StatusForbidden, map[string]interface{}{
+				"success": false, "message": "cannot reissue ticket",
+			})
+			return
+		}
+
+		WriteJSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"ticket":  ticket,
+		})
+	}
+}

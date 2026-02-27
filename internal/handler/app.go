@@ -2116,3 +2116,24 @@ func (a *App) CreateStoreAdminSession(foundShop *shop.Shop) (sessionID, subAdmin
 	}
 	return session.ID, subAdminID, nil
 }
+
+// ReissueTicketFromSession creates a new one-time login ticket for the SN user
+// associated with the given session. This allows an already-authenticated iframe
+// to generate a fresh ticket for opening the service portal in a new browser tab
+// (the "expand" / popout button).
+func (a *App) ReissueTicketFromSession(sessionUserID string) (string, error) {
+	// Session user_id is the users.id — look up the email to find the SN user.
+	var email string
+	err := a.readDB.QueryRow("SELECT email FROM users WHERE id = ? AND provider = 'sn'", sessionUserID).Scan(&email)
+	if err != nil {
+		return "", fmt.Errorf("not an SN user")
+	}
+
+	var snUserID int64
+	err = a.readDB.QueryRow("SELECT id FROM sn_users WHERE email = ?", email).Scan(&snUserID)
+	if err != nil {
+		return "", fmt.Errorf("SN user not found")
+	}
+
+	return a.CreateLoginTicket(snUserID)
+}
