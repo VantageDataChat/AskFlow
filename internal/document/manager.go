@@ -138,9 +138,11 @@ func (dm *DocumentManager) UploadFile(req UploadFileRequest) (*DocumentInfo, err
 
 	// File-level dedup: check if identical file content already exists (any status except failed)
 	fHash := fileHash(req.FileData)
+	log.Printf("[UploadFile] Checking for duplicate: file=%s hash=%s", req.FileName, fHash[:8])
 	if existingID := dm.findDocumentByContentHash(fHash); existingID != "" {
 		return nil, fmt.Errorf("文档内容重复，与已有文档相同")
 	}
+	log.Printf("[UploadFile] No duplicate found, proceeding with upload")
 
 	docID, err := generateID()
 	if err != nil {
@@ -589,8 +591,12 @@ func (dm *DocumentManager) findDocumentByContentHash(hash string) string {
 		`SELECT id FROM documents WHERE content_hash = ? AND status != 'failed' LIMIT 1`, hash,
 	).Scan(&docID)
 	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Printf("[findDocumentByContentHash] Query error for hash=%s: %v", hash[:8], err)
+		}
 		return ""
 	}
+	log.Printf("[findDocumentByContentHash] Found duplicate document: hash=%s docID=%s", hash[:8], docID)
 	return docID
 }
 
@@ -696,6 +702,15 @@ func (dm *DocumentManager) DeleteDocument(docID string) error {
 		return fmt.Errorf("invalid document ID")
 	}
 
+	log.Printf("[DeleteDocument] Starting deletion for docID=%s", docID)
+
+	// Get content_hash before deletion for logging
+	var contentHash string
+	dm.db.QueryRow(`SELECT content_hash FROM documents WHERE id = ?`, docID).Scan(&contentHash)
+	if contentHash != "" {
+		log.Printf("[DeleteDocument] Document content_hash=%s", contentHash[:8])
+	}
+
 	if err := dm.vectorStore.DeleteByDocID(docID); err != nil {
 		return fmt.Errorf("failed to delete vectors: %w", err)
 	}
@@ -708,20 +723,48 @@ func (dm *DocumentManager) DeleteDocument(docID string) error {
 	defer tx.Rollback()
 
 	// Delete associated video_segments records (cascade cleanup for video documents)
-	if _, err := tx.Exec(`DELETE FROM video_segments WHERE document_id = ?`, docID); err != nil {
+	result, err := tx.Exec(`DELETE FROM video_segments WHERE document_id = ?`, docID)
+	if err != nil {
 		return fmt.Errorf("failed to delete video segments: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM documents WHERE id = ?`, docID); err != nil {
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected > 0 {
+		log.Printf("[DeleteDocument] Deleted %d video segments", rowsAffected)
+	}
+
+	result, err = tx.Exec(`DELETE FROM documents WHERE id = ?`, docID)
+	if err != nil {
 		return fmt.Errorf("failed to delete document record: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		log.Printf("[DeleteDocument] Warning: No document record found for docID=%s", docID)
+	} else {
+		log.Printf("[DeleteDocument] Deleted document record (rows=%d)", rowsAffected)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit delete transaction: %w", err)
 	}
 
+	log.Printf("[DeleteDocument] Transaction committed successfully for docID=%s", docID)
+
+	// Verify deletion by querying again
+	var checkID string
+	err = dm.db.QueryRow(`SELECT id FROM documents WHERE id = ?`, docID).Scan(&checkID)
+	if err == sql.ErrNoRows {
+		log.Printf("[DeleteDocument] Verified: Document record deleted successfully")
+	} else if err == nil {
+		log.Printf("[DeleteDocument] ERROR: Document record still exists after deletion!")
+	}
+
 	// Remove original file directory (after successful DB commit)
 	dir := filepath.Join(".", "data", "uploads", docID)
-	os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		log.Printf("[DeleteDocument] Warning: Failed to remove directory %s: %v", dir, err)
+	} else {
+		log.Printf("[DeleteDocument] Removed file directory: %s", dir)
+	}
+
 	return nil
 }
 
