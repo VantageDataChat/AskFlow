@@ -4286,6 +4286,7 @@
                 setVal('cfg-video-ffmpeg-path', video.ffmpeg_path || '');
                 setVal('cfg-video-rapidspeech-path', video.rapidspeech_path || '');
                 setVal('cfg-video-keyframe-interval', video.keyframe_interval || 10);
+                setVal('cfg-video-scene-threshold', video.scene_change_threshold || 0.3);
                 setVal('cfg-video-rapidspeech-model', video.rapidspeech_model || '');
                 setVal('cfg-video-max-upload-size', video.max_upload_size_mb || 500);
                 setVal('cfg-video-processing-timeout', video.processing_timeout_min || 120);
@@ -4355,6 +4356,7 @@
         var ffmpegPath = getVal('cfg-video-ffmpeg-path');
         var rapidspeechPath = getVal('cfg-video-rapidspeech-path');
         var keyframeInterval = getVal('cfg-video-keyframe-interval');
+        var sceneThreshold = getVal('cfg-video-scene-threshold');
         var rapidspeechModel = getVal('cfg-video-rapidspeech-model');
         var maxUploadSize = getVal('cfg-video-max-upload-size');
         var processingTimeout = getVal('cfg-video-processing-timeout');
@@ -4362,6 +4364,7 @@
         updates['video.ffmpeg_path'] = ffmpegPath;
         updates['video.rapidspeech_path'] = rapidspeechPath;
         if (keyframeInterval !== '') updates['video.keyframe_interval'] = parseInt(keyframeInterval, 10);
+        if (sceneThreshold !== '') updates['video.scene_change_threshold'] = parseFloat(sceneThreshold);
         if (rapidspeechModel) updates['video.rapidspeech_model'] = rapidspeechModel;
         if (maxUploadSize !== '') updates['video.max_upload_size_mb'] = parseInt(maxUploadSize, 10);
         if (processingTimeout !== '') updates['video.processing_timeout_min'] = parseInt(processingTimeout, 10);

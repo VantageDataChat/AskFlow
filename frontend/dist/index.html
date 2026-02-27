@@ -2463,7 +2463,17 @@
 
                                         <input type="number" id="cfg-video-keyframe-interval" min="1" max="300" placeholder="10">
 
-                                        <span class="admin-form-hint" data-i18n="admin_multimodal_keyframe_hint">每隔多少秒从视频中提取一帧图像用于图像检索，默认 10 秒</span>
+                                        <span class="admin-form-hint" data-i18n="admin_multimodal_keyframe_hint">每隔多少秒从视频中提取一帧图像用于图像检索，默认 10 秒（仅在场景检测失败时使用）</span>
+
+                                    </div>
+
+                                    <div class="admin-form-row">
+
+                                        <label data-i18n="admin_multimodal_scene_threshold">场景切换检测阈值</label>
+
+                                        <input type="number" id="cfg-video-scene-threshold" min="0" max="1" step="0.01" placeholder="0.3">
+
+                                        <span class="admin-form-hint" data-i18n="admin_multimodal_scene_threshold_hint">场景变化检测的敏感度（0-1），值越大越严格，只在画面发生实质性改变时提取关键帧，默认 0.3</span>
 
                                     </div>
 

@@ -186,10 +186,11 @@ func SerializeTranscript(segments []TranscriptSegment) ([]byte, error) {
 
 // Parser 视频解析器，封装 ffmpeg 和 RapidSpeech 的调用逻辑
 type Parser struct {
-	FFmpegPath        string
-	RapidSpeechPath   string
-	KeyframeInterval  int
-	RapidSpeechModel  string
+	FFmpegPath           string
+	RapidSpeechPath      string
+	KeyframeInterval     int
+	RapidSpeechModel     string
+	SceneChangeThreshold float64
 }
 
 // NewParser 根据 VideoConfig 创建 Parser 实例
@@ -198,11 +199,16 @@ func NewParser(cfg config.VideoConfig) *Parser {
 	if interval <= 0 {
 		interval = 10
 	}
+	threshold := cfg.SceneChangeThreshold
+	if threshold <= 0 {
+		threshold = 0.3
+	}
 	return &Parser{
-		FFmpegPath:       cfg.FFmpegPath,
-		RapidSpeechPath:  cfg.RapidSpeechPath,
-		KeyframeInterval: interval,
-		RapidSpeechModel: cfg.RapidSpeechModel,
+		FFmpegPath:           cfg.FFmpegPath,
+		RapidSpeechPath:      cfg.RapidSpeechPath,
+		KeyframeInterval:     interval,
+		RapidSpeechModel:     cfg.RapidSpeechModel,
+		SceneChangeThreshold: threshold,
 	}
 }
 
@@ -401,12 +407,12 @@ func (p *Parser) ExtractKeyframes(videoPath, outputDir string) ([]Keyframe, erro
 	}
 
 	// 使用场景切换检测提取关键帧，并记录时间戳
-	// select='gt(scene,0.3)' 表示场景变化阈值为0.3（0-1之间，值越大越严格）
+	// select='gt(scene,threshold)' 表示场景变化阈值（0-1之间，值越大越严格）
 	// showinfo 过滤器用于输出每帧的时间戳信息
 	outputPattern := filepath.Join(outputDir, "frame_%04d.jpg")
 	cmd := exec.Command(p.FFmpegPath,
 		"-i", videoPath,
-		"-vf", "select='gt(scene,0.3)',showinfo",
+		"-vf", fmt.Sprintf("select='gt(scene,%.2f)',showinfo", p.SceneChangeThreshold),
 		"-vsync", "vfr",
 		"-q:v", "2",
 		outputPattern,

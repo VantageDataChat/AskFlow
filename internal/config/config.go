@@ -109,14 +109,15 @@ type OAuthConfig struct {
 
 // VideoConfig holds video processing configuration.
 type VideoConfig struct {
-	FFmpegPath            string `json:"ffmpeg_path"`              // ffmpeg executable path, empty means video not supported
-	RapidSpeechPath       string `json:"rapidspeech_path"`         // rs-asr-offline executable path, empty means skip transcription
-	KeyframeInterval      int    `json:"keyframe_interval"`        // keyframe sampling interval in seconds, default 10
-	RapidSpeechModel      string `json:"rapidspeech_model"`        // RapidSpeech model path (model.gguf file)
-	MaxUploadSizeMB       int    `json:"max_upload_size_mb"`       // max video/document upload size in MB, default 500
-	KeyframeOCREnabled    bool   `json:"keyframe_ocr_enabled"`     // enable LLM-based OCR on keyframes for text search
-	KeyframeOCRMaxFrames  int    `json:"keyframe_ocr_max_frames"`  // max keyframes to OCR (0=unlimited), default 20
-	ProcessingTimeoutMin  int    `json:"processing_timeout_min"`   // async processing timeout in minutes, default 120
+	FFmpegPath            string  `json:"ffmpeg_path"`              // ffmpeg executable path, empty means video not supported
+	RapidSpeechPath       string  `json:"rapidspeech_path"`         // rs-asr-offline executable path, empty means skip transcription
+	KeyframeInterval      int     `json:"keyframe_interval"`        // keyframe sampling interval in seconds, default 10
+	RapidSpeechModel      string  `json:"rapidspeech_model"`        // RapidSpeech model path (model.gguf file)
+	MaxUploadSizeMB       int     `json:"max_upload_size_mb"`       // max video/document upload size in MB, default 500
+	KeyframeOCREnabled    bool    `json:"keyframe_ocr_enabled"`     // enable LLM-based OCR on keyframes for text search
+	KeyframeOCRMaxFrames  int     `json:"keyframe_ocr_max_frames"`  // max keyframes to OCR (0=unlimited), default 20
+	ProcessingTimeoutMin  int     `json:"processing_timeout_min"`   // async processing timeout in minutes, default 120
+	SceneChangeThreshold  float64 `json:"scene_change_threshold"`   // scene change detection threshold (0-1), default 0.3
 }
 
 // AdminConfig holds admin authentication configuration.
@@ -207,11 +208,12 @@ func DefaultConfig() *Config {
 			UseTLS: true,
 		},
 		Video: VideoConfig{
-			KeyframeInterval:     10,
-			MaxUploadSizeMB:      500,
-			KeyframeOCREnabled:   true,
-			KeyframeOCRMaxFrames: 20,
-			ProcessingTimeoutMin: 120,
+			KeyframeInterval:      10,
+			MaxUploadSizeMB:       500,
+			KeyframeOCREnabled:    true,
+			KeyframeOCRMaxFrames:  20,
+			ProcessingTimeoutMin:  120,
+			SceneChangeThreshold:  0.3,
 		},
 	}
 }
@@ -748,6 +750,15 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 			return errors.New("processing_timeout_min must be between 1 and 1440")
 		}
 		cm.config.Video.ProcessingTimeoutMin = n
+	case "video.scene_change_threshold":
+		f, err := toFloat64(val)
+		if err != nil {
+			return err
+		}
+		if f < 0 || f > 1.0 {
+			return errors.New("scene_change_threshold must be between 0 and 1.0")
+		}
+		cm.config.Video.SceneChangeThreshold = f
 
 	// Server fields
 	case "server.bind":
@@ -930,6 +941,9 @@ func (cm *ConfigManager) applyDefaults(cfg *Config) {
 	}
 	if cfg.Video.ProcessingTimeoutMin == 0 {
 		cfg.Video.ProcessingTimeoutMin = defaults.Video.ProcessingTimeoutMin
+	}
+	if cfg.Video.SceneChangeThreshold == 0 {
+		cfg.Video.SceneChangeThreshold = defaults.Video.SceneChangeThreshold
 	}
 }
 
