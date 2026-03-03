@@ -118,13 +118,12 @@ func BuildMessages(prompt string, context []string, question string) []chatMessa
 
 	var userParts []string
 	if len(context) > 0 {
-		userParts = append(userParts, "参考资料：")
 		for i, chunk := range context {
 			userParts = append(userParts, fmt.Sprintf("[%d] %s", i+1, chunk))
 		}
 		userParts = append(userParts, "")
 	}
-	userParts = append(userParts, "用户问题："+question)
+	userParts = append(userParts, question)
 
 	return []chatMessage{
 		{Role: "system", Content: systemContent},
@@ -252,13 +251,12 @@ func BuildMessagesWithImage(prompt string, context []string, question string, im
 
 	var textParts []string
 	if len(context) > 0 {
-		textParts = append(textParts, "参考资料：")
 		for i, chunk := range context {
 			textParts = append(textParts, fmt.Sprintf("[%d] %s", i+1, chunk))
 		}
 		textParts = append(textParts, "")
 	}
-	textParts = append(textParts, "用户问题："+question)
+	textParts = append(textParts, question)
 
 	userContent := []visionContentPart{
 		{Type: "image_url", ImageURL: &visionImageURL{URL: imageDataURL}},

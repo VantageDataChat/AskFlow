@@ -152,6 +152,7 @@
                 showPage('login');
                 loadLoginCaptcha();
                 applyAnonFrontendBtn();
+                fetchProductName();
                 // Show error detail from ticket-login failure (if present in URL)
                 var loginParams = new URLSearchParams(window.location.search);
                 var loginError = loginParams.get('error');
@@ -168,6 +169,7 @@
             } else {
                 showPage('login');
                 showRegisterForm();
+                fetchProductName();
             }
         } else if (route === '/verify') {
             showPage('verify');
@@ -180,6 +182,7 @@
                 showPage('login');
                 loadLoginCaptcha();
                 applyAnonFrontendBtn();
+                fetchProductName();
             } else {
                 showPage('chat');
                 initChat();
@@ -189,6 +192,7 @@
                 showPage('login');
                 loadLoginCaptcha();
                 applyAnonFrontendBtn();
+                fetchProductName();
             } else {
                 showPage('chat');
                 initChat();
