@@ -219,7 +219,7 @@ func (qe *QueryEngine) TranslateText(text, targetLang string) (string, error) {
 		langName = "English"
 	}
 	prompt := fmt.Sprintf("你是一个翻译助手。将以下文本翻译为%s。只输出翻译结果，不要添加任何解释或引号。如果文本已经是目标语言，直接原样输出。", langName)
-	translated, err := ls.Generate(prompt, []string{text}, text)
+	translated, err := ls.Generate(prompt, nil, text)
 	if err != nil {
 		return "", err
 	}
