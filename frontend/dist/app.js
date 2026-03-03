@@ -4519,7 +4519,25 @@
         }).then(function (response) {
             if (!response.ok) {
                 return response.json().then(function (data) {
-                    throw new Error(data.error || i18n.t('admin_multimodal_auto_setup_failed'));
+                    var errorMsg = data.error || i18n.t('admin_multimodal_auto_setup_failed');
+                    // Check if it's a system compatibility error
+                    if (errorMsg.indexOf('仅支持') !== -1 || errorMsg.indexOf('不支持') !== -1 || errorMsg.indexOf('CentOS') !== -1) {
+                        // System not supported - hide start button permanently
+                        if (status) {
+                            status.textContent = errorMsg;
+                            status.className = 'auto-setup-status auto-setup-error';
+                        }
+                        appendLog(errorMsg, 'log-error');
+                        if (startBtn) {
+                            startBtn.style.display = 'none'; // Permanently hide
+                        }
+                        if (closeBtn) closeBtn.disabled = false;
+                        autoSetupRunning = false;
+                        autoSetupAbort = null;
+                        flushLogs();
+                        return;
+                    }
+                    throw new Error(errorMsg);
                 });
             }
             var reader = response.body.getReader();

@@ -1702,9 +1702,9 @@ func (a *App) ListCustomersPaged(page, pageSize int, search string) (*CustomerLi
 	}
 
 	// Build WHERE clause (use table-qualified column names for JOIN compatibility)
-	baseWhere := `provider != 'admin_sub' AND id != 'admin'`
+	baseWhere := `provider != 'admin_sub' AND id != 'admin' AND provider != 'anonymous'`
 	// For JOIN queries, we need table-qualified names to avoid ambiguity with login_bans.id
-	joinWhere := `u.provider != 'admin_sub' AND u.id != 'admin'`
+	joinWhere := `u.provider != 'admin_sub' AND u.id != 'admin' AND u.provider != 'anonymous'`
 	var args []interface{}
 	if search != "" {
 		baseWhere += ` AND COALESCE(email, '') LIKE ?`
