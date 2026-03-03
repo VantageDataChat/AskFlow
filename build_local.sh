@@ -9,6 +9,7 @@ echo "============================================"
 echo
 
 echo "[1/3] Updating GoPPT package..."
+export GOPROXY=https://goproxy.cn,direct
 go get -u github.com/VantageDataChat/GoPPT
 go mod tidy
 echo "       Update OK"
