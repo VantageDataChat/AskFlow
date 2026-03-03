@@ -150,6 +150,30 @@ func HandleVideoAutoSetup(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusBadRequest, "auto-setup is only supported on Linux")
 			return
 		}
+
+		// Check if the system is Ubuntu/Debian (only supported distros)
+		osRelease, err := os.ReadFile("/etc/os-release")
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "无法检测操作系统类型")
+			return
+		}
+		osInfo := string(osRelease)
+		isUbuntu := strings.Contains(osInfo, "ID=ubuntu") || strings.Contains(osInfo, "ID_LIKE=ubuntu") ||
+			strings.Contains(osInfo, "ID=debian") || strings.Contains(osInfo, "ID_LIKE=debian")
+
+		if !isUbuntu {
+			// Check if it's CentOS or other unsupported distros
+			isCentOS := strings.Contains(osInfo, "ID=\"centos\"") || strings.Contains(osInfo, "ID=centos") ||
+				strings.Contains(osInfo, "ID=\"rhel\"") || strings.Contains(osInfo, "ID=rhel")
+
+			if isCentOS {
+				WriteError(w, http.StatusBadRequest, "自动安装仅支持 Ubuntu/Debian 系统。CentOS 系统版本过旧，不再支持自动安装。请手动安装 FFmpeg 和 RapidSpeech，或使用 Ubuntu 22.04+ 系统。")
+			} else {
+				WriteError(w, http.StatusBadRequest, "自动安装仅支持 Ubuntu/Debian 系统。当前系统不支持自动安装，请手动安装 FFmpeg 和 RapidSpeech。")
+			}
+			return
+		}
+
 		_, role, err := GetAdminSession(app, r)
 		if err != nil {
 			WriteAdminSessionError(w, err)
