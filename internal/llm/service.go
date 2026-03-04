@@ -15,10 +15,17 @@ import (
 	"askflow/internal/errlog"
 )
 
+// HistoryMessage represents a message in conversation history.
+type HistoryMessage struct {
+	Role    string // "user" or "assistant"
+	Content string
+}
+
 // LLMService defines the interface for LLM text generation.
 type LLMService interface {
 	Generate(prompt string, context []string, question string) (string, error)
 	GenerateWithImage(prompt string, context []string, question string, imageDataURL string) (string, error)
+	GenerateWithHistory(prompt string, context []string, history []HistoryMessage, question string) (string, error)
 }
 
 // APILLMService implements LLMService using an OpenAI-compatible Chat Completion API.
@@ -136,6 +143,50 @@ func BuildMessages(prompt string, context []string, question string) []chatMessa
 // It retries up to 3 times with exponential backoff on transient failures (network errors, 429, 5xx).
 func (s *APILLMService) Generate(prompt string, context []string, question string) (string, error) {
 	messages := BuildMessages(prompt, context, question)
+
+	answer, err := s.callAPIWithRetry(messages)
+	if err != nil {
+		return "服务暂时不可用，请稍后重试", fmt.Errorf("LLM API failed after retries: %w", err)
+	}
+	return answer, nil
+}
+
+// GenerateWithHistory sends a prompt with context, conversation history, and question to the LLM.
+func (s *APILLMService) GenerateWithHistory(prompt string, context []string, history []HistoryMessage, question string) (string, error) {
+	systemContent := prompt
+	if systemContent == "" {
+		systemContent = "你是一个专业的软件技术支持助手。请根据提供的参考资料回答用户的问题。" +
+			"如果参考资料中没有相关信息，请如实告知用户。回答应简洁、准确、有条理。" +
+			"\n\n重要规则：你必须使用与用户提问相同的语言来回答。如果用户用英文提问，你必须用英文回答；如果用户用中文提问，你必须用中文回答；其他语言同理。无论参考资料是什么语言，都要翻译成用户提问的语言来回答。" +
+			"\n\n格式规则：使用有序列表时，请使用递增的序号（1. 2. 3.），不要所有条目都用1.开头。"
+	}
+
+	// Build messages array: system + context + history + current question
+	messages := []chatMessage{{Role: "system", Content: systemContent}}
+
+	// Add reference materials to system message if present
+	if len(context) > 0 {
+		var contextParts []string
+		contextParts = append(contextParts, "参考资料：")
+		for i, chunk := range context {
+			contextParts = append(contextParts, fmt.Sprintf("[%d] %s", i+1, chunk))
+		}
+		messages[0].Content = systemContent + "\n\n" + strings.Join(contextParts, "\n")
+	}
+
+	// Add conversation history
+	for _, msg := range history {
+		messages = append(messages, chatMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	// Add current question
+	messages = append(messages, chatMessage{
+		Role:    "user",
+		Content: question,
+	})
 
 	answer, err := s.callAPIWithRetry(messages)
 	if err != nil {

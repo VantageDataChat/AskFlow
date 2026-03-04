@@ -6,6 +6,8 @@ github.com/VantageDataChat/GoPPT v0.0.0-20260222014237-f771afd27c28 h1:/32FsURUy
 github.com/VantageDataChat/GoPPT v0.0.0-20260222014237-f771afd27c28/go.mod h1:clmfETR4bGOcP22SXTZ9wqwIalTGqnea4rmTiVmkppk=
 github.com/VantageDataChat/GoWord v0.0.0-20260210220908-40c2b82002d1 h1:PX+mfxYdOpURSlWukyOir8jNhlvpkycCOSmy9+xOpOo=
 github.com/VantageDataChat/GoWord v0.0.0-20260210220908-40c2b82002d1/go.mod h1:jLTMrwq72u951bUzqySqbFSKdBsE9K2ueGtpognaIlE=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 h1:QwWKgMY28TAXaDl+ExRDqGQltzXqN/xypdKP86niVn8=
 github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728/go.mod h1:1fEHWurg7pvf5SG6XNE5Q8UZmOwex51Mkx3SLhrW5B4=
 github.com/mattn/go-sqlite3 v1.14.34 h1:3NtcvcUnFBPsuRcno8pUtupspG/GM+9nZ88zgJcp6Zk=

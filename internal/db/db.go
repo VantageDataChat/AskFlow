@@ -119,6 +119,11 @@ func InitDB(dbPath string) (*DBPair, error) {
 		return nil, fmt.Errorf("failed to create shop tables: %w", err)
 	}
 
+	if err := createConversationTables(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create conversation tables: %w", err)
+	}
+
 	if err := migrateTables(writeDB); err != nil {
 		cleanup()
 		return nil, err
@@ -132,6 +137,11 @@ func InitDB(dbPath string) (*DBPair, error) {
 	if err := createIndexes(writeDB); err != nil {
 		cleanup()
 		return nil, err
+	}
+
+	if err := createConversationIndexes(writeDB); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("failed to create conversation indexes: %w", err)
 	}
 
 	return &DBPair{Write: writeDB, Read: readDB}, nil
@@ -546,6 +556,7 @@ func columnExists(db *sql.DB, table, column string) bool {
 		"products": true, "admin_user_products": true,
 		"video_segments": true, "faq_entries": true,
 		"shops": true, "shop_activation_requests": true,
+		"conversations": true, "conversation_messages": true,
 	}
 	if !validTables[table] {
 		return false

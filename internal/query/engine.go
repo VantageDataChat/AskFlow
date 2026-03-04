@@ -23,21 +23,24 @@ import (
 
 // QueryRequest represents a user's question submission.
 type QueryRequest struct {
-	Question  string `json:"question"`
-	UserID    string `json:"user_id"`
-	ProductID string `json:"product_id"`
-	ImageData string `json:"image_data,omitempty"` // base64 data URL from clipboard paste
+	Question       string `json:"question"`
+	UserID         string `json:"user_id"`
+	ProductID      string `json:"product_id"`
+	ImageData      string `json:"image_data,omitempty"`      // base64 data URL from clipboard paste
+	ConversationID string `json:"conversation_id,omitempty"` // existing conversation ID
+	AnonymousID    string `json:"anonymous_id,omitempty"`    // anonymous user identifier
 }
 
 
 // QueryResponse represents the result of a RAG query.
 type QueryResponse struct {
-	Answer        string      `json:"answer"`
-	Sources       []SourceRef `json:"sources"`
-	IsPending     bool        `json:"is_pending"`
-	AllowDownload bool        `json:"allow_download"`
-	Message       string      `json:"message,omitempty"`
-	DebugInfo     *DebugInfo  `json:"debug_info,omitempty"`
+	Answer         string      `json:"answer"`
+	Sources        []SourceRef `json:"sources"`
+	IsPending      bool        `json:"is_pending"`
+	AllowDownload  bool        `json:"allow_download"`
+	Message        string      `json:"message,omitempty"`
+	DebugInfo      *DebugInfo  `json:"debug_info,omitempty"`
+	ConversationID string      `json:"conversation_id,omitempty"` // conversation ID for multi-turn dialogue
 }
 
 // DebugInfo holds diagnostic information for debugging the query pipeline.
@@ -294,6 +297,11 @@ func (qe *QueryEngine) classifyIntent(question string, ls llm.LLMService, cfg *c
 // 3. If results found, call LLM to generate an answer with source references
 // 4. If no results, create a pending question and notify the user
 func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
+	return qe.QueryWithHistory(req, nil)
+}
+
+// QueryWithHistory executes the RAG pipeline with conversation history support.
+func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryMessage) (*QueryResponse, error) {
 	// Snapshot services under read lock for concurrency safety
 	es, ls, cfg := qe.getServices()
 
@@ -663,6 +671,9 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 				"\n\n格式规则：使用有序列表时，请使用递增的序号（1. 2. 3.），不要所有条目都用1.开头。"
 		}
 		answer, err = ls.GenerateWithImage(visionPrompt, context, req.Question, req.ImageData)
+	} else if len(history) > 0 {
+		// Use history-aware generation
+		answer, err = ls.GenerateWithHistory(systemPrompt, context, history, req.Question)
 	} else {
 		answer, err = ls.Generate(systemPrompt, context, req.Question)
 	}

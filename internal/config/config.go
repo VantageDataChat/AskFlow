@@ -36,9 +36,10 @@ type Config struct {
 	SMTP         SMTPConfig      `json:"smtp"`
 	ProductIntro string          `json:"product_intro"`
 	ProductName  string          `json:"product_name"`
-	Video        VideoConfig     `json:"video"`
-	AuthServer    string          `json:"auth_server"`     // license verification server host, e.g. "license.vantagedata.chat"
-	MarketBaseURL string          `json:"market_base_url"` // Market service base URL for shop activation queries
+	Video        VideoConfig        `json:"video"`
+	Conversation ConversationConfig `json:"conversation"`
+	AuthServer    string             `json:"auth_server"`     // license verification server host, e.g. "license.vantagedata.chat"
+	MarketBaseURL string             `json:"market_base_url"` // Market service base URL for shop activation queries
 }
 
 
@@ -130,6 +131,14 @@ type AdminConfig struct {
 	DefaultProductID  string `json:"default_product_id"`
 }
 
+// ConversationConfig holds conversation history configuration.
+type ConversationConfig struct {
+	Enabled            bool `json:"enabled"`               // whether conversation history is enabled
+	MaxHistoryMessages int  `json:"max_history_messages"`  // max number of history messages to include
+	MaxHistoryAge      int  `json:"max_history_age"`       // max age of conversations in days
+	CompressionEnabled bool `json:"compression_enabled"`   // whether to compress old history
+}
+
 // ConfigManager manages loading, saving, and updating configuration.
 type ConfigManager struct {
 	configPath    string
@@ -214,6 +223,12 @@ func DefaultConfig() *Config {
 			KeyframeOCRMaxFrames:  20,
 			ProcessingTimeoutMin:  120,
 			SceneChangeThreshold:  0.3,
+		},
+		Conversation: ConversationConfig{
+			Enabled:            true,
+			MaxHistoryMessages: 10,
+			MaxHistoryAge:      30,
+			CompressionEnabled: false,
 		},
 	}
 }
@@ -944,6 +959,12 @@ func (cm *ConfigManager) applyDefaults(cfg *Config) {
 	}
 	if cfg.Video.SceneChangeThreshold == 0 {
 		cfg.Video.SceneChangeThreshold = defaults.Video.SceneChangeThreshold
+	}
+	if cfg.Conversation.MaxHistoryMessages == 0 {
+		cfg.Conversation.MaxHistoryMessages = defaults.Conversation.MaxHistoryMessages
+	}
+	if cfg.Conversation.MaxHistoryAge == 0 {
+		cfg.Conversation.MaxHistoryAge = defaults.Conversation.MaxHistoryAge
 	}
 }
 
