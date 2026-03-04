@@ -315,6 +315,24 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		}
 	}
 
+	// Enhance query with conversation context for better retrieval
+	// If this is a follow-up question (short query with history), combine with previous context
+	enhancedQuestion := req.Question
+	if len(history) > 0 && len(req.Question) < 20 {
+		// This looks like a follow-up question (e.g., "列出详细格式", "具体有哪些")
+		// Extract the main topic from recent history
+		for i := len(history) - 1; i >= 0 && i >= len(history)-2; i-- {
+			if history[i].Role == "user" {
+				// Combine previous user question with current question for better retrieval
+				enhancedQuestion = history[i].Content + " " + req.Question
+				if debugMode {
+					dbg.Steps = append(dbg.Steps, fmt.Sprintf("Enhanced query with history: %s", enhancedQuestion))
+				}
+				break
+			}
+		}
+	}
+
 	// Step 0: Intent classification (skip if image is attached — image may contain product info)
 	// Also skip for knowledge_base products — they should answer all questions without filtering
 	skipIntentClassification := req.ImageData != ""
@@ -455,8 +473,8 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 
 	// ===== Level 3: Full RAG Pipeline =====
 
-	// Step 1: Embed the question
-	queryVector, err := qe.cachedEmbed(req.Question, es)
+	// Step 1: Embed the question (use enhanced question for better retrieval)
+	queryVector, err := qe.cachedEmbed(enhancedQuestion, es)
 	if err != nil {
 		errlog.Logf("[Query] failed to embed question: %v", err)
 		return nil, fmt.Errorf("failed to embed question: %w", err)
