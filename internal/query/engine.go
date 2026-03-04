@@ -301,7 +301,17 @@ func (qe *QueryEngine) Query(req QueryRequest) (*QueryResponse, error) {
 }
 
 // QueryWithHistory executes the RAG pipeline with conversation history support.
+// QueryWithHistory executes the RAG pipeline with conversation history support.
 func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryMessage) (*QueryResponse, error) {
+	// Performance monitoring
+	startTime := time.Now()
+	defer func() {
+		duration := time.Since(startTime)
+		if duration > 3*time.Second {
+			log.Printf("[Query] SLOW: query took %v, question=%q", duration, req.Question)
+		}
+	}()
+
 	// Snapshot services under read lock for concurrency safety
 	es, ls, cfg := qe.getServices()
 
@@ -315,36 +325,53 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		}
 	}
 
-	// Enhance query with conversation context for better retrieval
-	// If this is a follow-up question (short query with history), combine with previous context
+	// ===== Context Tracking and Resolution Fix =====
+	// Detect ambiguous follow-up queries and resolve them using conversation history
 	enhancedQuestion := req.Question
-	if len(history) > 0 {
-		// Count actual characters (runes) not bytes
-		questionRunes := []rune(req.Question)
-		// Detect follow-up questions: short queries (<30 chars) or common follow-up phrases
-		isFollowUp := len(questionRunes) < 30 ||
-			strings.Contains(req.Question, "详细") ||
-			strings.Contains(req.Question, "清单") ||
-			strings.Contains(req.Question, "列出") ||
-			strings.Contains(req.Question, "具体") ||
-			strings.Contains(req.Question, "哪些") ||
-			strings.Contains(req.Question, "什么") ||
-			strings.Contains(req.Question, "more details") ||
-			strings.Contains(req.Question, "list") ||
-			strings.Contains(req.Question, "what")
+	var topicKeywords string
+	isFollowUp := false
 
-		if isFollowUp {
-			// Extract the main topic from recent history (last 2 user questions)
-			for i := len(history) - 1; i >= 0 && i >= len(history)-4; i-- {
-				if history[i].Role == "user" {
-					// Combine previous user question with current question for better retrieval
-					enhancedQuestion = history[i].Content + " " + req.Question
-					log.Printf("[Query] Enhanced query for retrieval: %s", enhancedQuestion)
-					if debugMode {
-						dbg.Steps = append(dbg.Steps, fmt.Sprintf("Enhanced query with history: %s", enhancedQuestion))
-					}
-					break
+	if len(history) > 0 {
+		// Step 1: Detect ambiguous references
+		hasAmbiguousRef := hasAmbiguousReference(req.Question)
+
+		if hasAmbiguousRef {
+			// Step 2: Extract topic keywords from recent conversation turns
+			// Look at the last 2-3 turns (up to 6 messages) to find established topic
+			topicKeywords = extractTopicFromHistory(history, 6)
+
+			if topicKeywords != "" {
+				isFollowUp = true
+				// Step 3: Resolve ambiguous query by appending topic keywords
+				// This creates a more natural query: "详细看看 OCR格式" instead of "OCR功能支持哪些格式? 详细看看"
+				// Validate topic keywords before using
+				topicKeywords = strings.TrimSpace(topicKeywords)
+				if len(topicKeywords) > 2 {
+					enhancedQuestion = req.Question + " " + topicKeywords
 				}
+
+				if debugMode {
+					dbg.Steps = append(dbg.Steps,
+						fmt.Sprintf("Context resolution: detected ambiguous reference in '%s'", req.Question))
+					dbg.Steps = append(dbg.Steps,
+						fmt.Sprintf("Context resolution: extracted topic keywords: '%s'", topicKeywords))
+					dbg.Steps = append(dbg.Steps,
+						fmt.Sprintf("Context resolution: enhanced query: '%s'", enhancedQuestion))
+				}
+			} else {
+				// Step 4: Fallback handling - if no previous context exists
+				if debugMode {
+					dbg.Steps = append(dbg.Steps,
+						"Context resolution: ambiguous query but no previous context found")
+				}
+				// Let the query proceed normally - the LLM will handle the ambiguity
+			}
+		} else {
+			// Not an ambiguous reference - query has explicit subject
+			// No context resolution needed
+			if debugMode {
+				dbg.Steps = append(dbg.Steps,
+					"Context resolution: query has explicit subject, no resolution needed")
 			}
 		}
 	}
@@ -506,12 +533,6 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	topK := cfg.Vector.TopK
 	threshold := cfg.Vector.Threshold
 
-	// Detect if this is a follow-up question
-	isFollowUp := len(history) > 0 && (len([]rune(req.Question)) < 30 ||
-		strings.Contains(req.Question, "详细") ||
-		strings.Contains(req.Question, "清单") ||
-		strings.Contains(req.Question, "列出"))
-
 	if isFollowUp {
 		// For follow-up questions, increase threshold and reduce topK
 		// This ensures we only get highly relevant results
@@ -523,7 +544,6 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		if topK < 2 {
 			topK = 2
 		}
-		log.Printf("[Query] Follow-up detected: adjusted threshold=%.2f topK=%d", threshold, topK)
 		if debugMode {
 			dbg.Steps = append(dbg.Steps, fmt.Sprintf("Follow-up question: increased threshold to %.2f, reduced topK to %d", threshold, topK))
 		}
@@ -788,6 +808,201 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		DebugInfo: dbg,
 	}, nil
 }
+
+// hasAmbiguousReference checks if a query contains ambiguous references
+// that require context from previous turns to interpret.
+func hasAmbiguousReference(query string) bool {
+	query = strings.ToLower(query)
+	
+	// Common ambiguous phrases that lack explicit subject/topic
+	ambiguousPatterns := []string{
+		"详细看看",
+		"详细",
+		"tell me more",
+		"more details",
+		"show me",
+		"elaborate",
+		"具体",
+		"more info",
+		"继续",
+		"再说说",
+		"explain more",
+		"go on",
+	}
+	
+	for _, pattern := range ambiguousPatterns {
+		if strings.Contains(query, pattern) {
+			return true
+		}
+	}
+	
+	// Also check if query is very short (< 30 chars) which often indicates
+	// it's relying on context
+	queryRunes := []rune(query)
+	if len(queryRunes) < 30 && len(queryRunes) > 0 {
+		// Short queries without explicit subjects are likely ambiguous
+		// unless they're complete questions
+		hasQuestionWord := strings.Contains(query, "what") ||
+			strings.Contains(query, "how") ||
+			strings.Contains(query, "why") ||
+			strings.Contains(query, "when") ||
+			strings.Contains(query, "where") ||
+			strings.Contains(query, "什么") ||
+			strings.Contains(query, "怎么") ||
+			strings.Contains(query, "为什么") ||
+			strings.Contains(query, "哪些")
+		
+		if !hasQuestionWord {
+			return true
+		}
+	}
+	
+	return false
+}
+
+// extractTopicFromHistory extracts topic keywords from conversation history.
+// It looks at recent user questions and assistant responses to identify the main topic.
+// Returns a concise topic string (e.g., "OCR格式" instead of full question).
+func extractTopicFromHistory(history []llm.HistoryMessage, maxMessages int) string {
+	if len(history) == 0 {
+		return ""
+	}
+
+	// Limit search to recent messages
+	startIdx := len(history) - maxMessages
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	// Look for the most recent user question that establishes a topic
+	for i := len(history) - 1; i >= startIdx; i-- {
+		msg := history[i]
+		
+		// Extract topic from user questions
+		if msg.Role == "user" && len(msg.Content) > 0 {
+			topic := extractKeywordsFromQuery(msg.Content)
+			if topic != "" {
+				return topic
+			}
+		}
+		
+		// Also try to extract from assistant responses (they often contain the topic)
+		if msg.Role == "assistant" && len(msg.Content) > 0 {
+			topic := extractKeywordsFromResponse(msg.Content)
+			if topic != "" {
+				return topic
+			}
+		}
+	}
+
+	return ""
+}
+
+// extractKeywordsFromQuery extracts key topic words from a user query.
+// Examples:
+//   "OCR功能支持哪些格式?" -> "OCR格式"
+//   "What authentication methods are supported?" -> "authentication methods"
+func extractKeywordsFromQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
+
+	// Remove common question words and punctuation
+	originalQuery := query
+	query = strings.ToLower(query)
+	
+	// Chinese question patterns
+	chinesePatterns := []string{
+		"支持哪些", "有哪些", "包括哪些", "是什么", "怎么", "如何",
+		"功能", "方法", "方式", "?", "？",
+	}
+	for _, pattern := range chinesePatterns {
+		query = strings.ReplaceAll(query, pattern, " ")
+	}
+	
+	// English question patterns
+	englishPatterns := []string{
+		"what are the", "what is", "how to", "how do i",
+		"are supported", "is supported", "can i", "?",
+	}
+	for _, pattern := range englishPatterns {
+		query = strings.ReplaceAll(query, pattern, " ")
+	}
+	
+	// Clean up whitespace
+	query = strings.Join(strings.Fields(query), " ")
+	query = strings.TrimSpace(query)
+	
+	// If result is too short or empty, try to extract from original query
+	if len(query) < 3 {
+		// Extract first few meaningful words from original query
+		words := strings.Fields(originalQuery)
+		var keywords []string
+		for _, word := range words {
+			// Skip very short words and punctuation
+			cleaned := strings.Trim(word, "?？!！.,，。")
+			if len([]rune(cleaned)) > 2 {
+				keywords = append(keywords, cleaned)
+				if len(keywords) >= 3 {
+					break
+				}
+			}
+		}
+		if len(keywords) > 0 {
+			query = strings.Join(keywords, " ")
+		}
+	}
+	
+	// Limit to first 30 characters to keep it concise (reduced from 50)
+	if runes := []rune(query); len(runes) > 30 {
+		query = string(runes[:30])
+	}
+	
+	return query
+}
+
+// extractKeywordsFromResponse extracts key topic words from an assistant response.
+// Looks for the main subject being discussed in the first sentence.
+func extractKeywordsFromResponse(response string) string {
+	response = strings.TrimSpace(response)
+	if response == "" {
+		return ""
+	}
+
+	// Get first sentence (up to first period, question mark, or newline)
+	firstSentence := response
+	for _, sep := range []string{"。", ".", "？", "?", "\n"} {
+		if idx := strings.Index(response, sep); idx > 0 && idx < len(firstSentence) {
+			firstSentence = response[:idx]
+		}
+	}
+	
+	// Limit length
+	if runes := []rune(firstSentence); len(runes) > 100 {
+		firstSentence = string(runes[:100])
+	}
+	
+	// Extract nouns/keywords (simple heuristic: words longer than 2 chars)
+	words := strings.Fields(firstSentence)
+	var keywords []string
+	for _, word := range words {
+		// Skip common words
+		if len([]rune(word)) > 2 {
+			keywords = append(keywords, word)
+			if len(keywords) >= 5 {
+				break
+			}
+		}
+	}
+	
+	if len(keywords) == 0 {
+		return ""
+	}
+	
+	return strings.Join(keywords, " ")
+}
+
 
 // findDocumentImages queries the database for image chunks from the same documents
 // as the search results. Only returns images that are related to the matched chunks,
