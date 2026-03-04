@@ -318,17 +318,33 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	// Enhance query with conversation context for better retrieval
 	// If this is a follow-up question (short query with history), combine with previous context
 	enhancedQuestion := req.Question
-	if len(history) > 0 && len(req.Question) < 20 {
-		// This looks like a follow-up question (e.g., "列出详细格式", "具体有哪些")
-		// Extract the main topic from recent history
-		for i := len(history) - 1; i >= 0 && i >= len(history)-2; i-- {
-			if history[i].Role == "user" {
-				// Combine previous user question with current question for better retrieval
-				enhancedQuestion = history[i].Content + " " + req.Question
-				if debugMode {
-					dbg.Steps = append(dbg.Steps, fmt.Sprintf("Enhanced query with history: %s", enhancedQuestion))
+	if len(history) > 0 {
+		// Count actual characters (runes) not bytes
+		questionRunes := []rune(req.Question)
+		// Detect follow-up questions: short queries (<30 chars) or common follow-up phrases
+		isFollowUp := len(questionRunes) < 30 ||
+			strings.Contains(req.Question, "详细") ||
+			strings.Contains(req.Question, "清单") ||
+			strings.Contains(req.Question, "列出") ||
+			strings.Contains(req.Question, "具体") ||
+			strings.Contains(req.Question, "哪些") ||
+			strings.Contains(req.Question, "什么") ||
+			strings.Contains(req.Question, "more details") ||
+			strings.Contains(req.Question, "list") ||
+			strings.Contains(req.Question, "what")
+
+		if isFollowUp {
+			// Extract the main topic from recent history (last 2 user questions)
+			for i := len(history) - 1; i >= 0 && i >= len(history)-4; i-- {
+				if history[i].Role == "user" {
+					// Combine previous user question with current question for better retrieval
+					enhancedQuestion = history[i].Content + " " + req.Question
+					log.Printf("[Query] Enhanced query for retrieval: %s", enhancedQuestion)
+					if debugMode {
+						dbg.Steps = append(dbg.Steps, fmt.Sprintf("Enhanced query with history: %s", enhancedQuestion))
+					}
+					break
 				}
-				break
 			}
 		}
 	}
@@ -486,8 +502,33 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	}
 
 	// Step 2: Search vector store
+	// For follow-up questions, use stricter threshold and fewer results
 	topK := cfg.Vector.TopK
 	threshold := cfg.Vector.Threshold
+
+	// Detect if this is a follow-up question
+	isFollowUp := len(history) > 0 && (len([]rune(req.Question)) < 30 ||
+		strings.Contains(req.Question, "详细") ||
+		strings.Contains(req.Question, "清单") ||
+		strings.Contains(req.Question, "列出"))
+
+	if isFollowUp {
+		// For follow-up questions, increase threshold and reduce topK
+		// This ensures we only get highly relevant results
+		threshold = threshold * 1.15
+		if threshold > 0.9 {
+			threshold = 0.9
+		}
+		topK = (topK + 1) / 2 // Reduce by half, minimum 1
+		if topK < 2 {
+			topK = 2
+		}
+		log.Printf("[Query] Follow-up detected: adjusted threshold=%.2f topK=%d", threshold, topK)
+		if debugMode {
+			dbg.Steps = append(dbg.Steps, fmt.Sprintf("Follow-up question: increased threshold to %.2f, reduced topK to %d", threshold, topK))
+		}
+	}
+
 	results, err := qe.vectorStore.Search(queryVector, topK, threshold, req.ProductID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search vector store: %w", err)
