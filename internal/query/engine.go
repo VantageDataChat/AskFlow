@@ -330,7 +330,14 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	enhancedQuestion := req.Question
 	isFollowUp := false
 
+	if debugMode && dbg != nil {
+		dbg.Steps = append(dbg.Steps, fmt.Sprintf("Conversation history length: %d", len(history)))
+	}
+
 	if len(history) > 0 && len(history) <= 10 {
+		if debugMode && dbg != nil {
+			dbg.Steps = append(dbg.Steps, "Starting LLM context resolution...")
+		}
 		// Use LLM to detect if this is a follow-up query and resolve context
 		contextResolution := qe.resolveContextWithLLM(req.Question, history, ls, debugMode, dbg)
 		
@@ -347,6 +354,12 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		} else if debugMode {
 			dbg.Steps = append(dbg.Steps,
 				"Context resolution: independent query, no resolution needed")
+		}
+	} else if debugMode && dbg != nil {
+		if len(history) == 0 {
+			dbg.Steps = append(dbg.Steps, "Skipping context resolution: no conversation history")
+		} else {
+			dbg.Steps = append(dbg.Steps, fmt.Sprintf("Skipping context resolution: history too long (%d messages)", len(history)))
 		}
 	}
 

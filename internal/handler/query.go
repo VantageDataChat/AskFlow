@@ -120,8 +120,19 @@ func HandleQuery(app *App) http.HandlerFunc {
 						})
 					}
 					log.Printf("[Query] loaded %d history messages for conversation %s", len(history), conversationID)
+					if len(history) > 0 {
+						previewLen := 50
+						if len(history[0].Content) < previewLen {
+							previewLen = len(history[0].Content)
+						}
+						log.Printf("[Query] history preview: first message role=%s, content=%s", history[0].Role, history[0].Content[:previewLen])
+					}
 				}
+			} else {
+				log.Printf("[Query] no conversationID, history will be empty")
 			}
+		} else {
+			log.Printf("[Query] conversation disabled, history will be empty")
 		}
 
 		resp, err := app.queryEngine.QueryWithHistory(req, history)
