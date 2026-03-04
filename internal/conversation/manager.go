@@ -42,30 +42,17 @@ func NewManager(readDB, writeDB *sql.DB) *Manager {
 }
 
 // GetOrCreateConversation retrieves an existing conversation or creates a new one.
+// If conversationID is provided and valid, returns it.
+// Otherwise, always creates a new conversation to ensure proper session isolation.
 func (m *Manager) GetOrCreateConversation(userID, sessionID, productID string) (string, error) {
 	if userID == "" {
 		return "", fmt.Errorf("userID is required")
 	}
 
-	// Try to find the most recent conversation for this user and product
-	var conversationID string
-	query := `
-		SELECT id FROM conversations
-		WHERE user_id = ? AND product_id = ?
-		ORDER BY updated_at DESC
-		LIMIT 1
-	`
-	err := m.readDB.QueryRow(query, userID, productID).Scan(&conversationID)
-	if err == nil {
-		return conversationID, nil
-	}
-	if err != sql.ErrNoRows {
-		return "", fmt.Errorf("query conversation: %w", err)
-	}
-
-	// Create new conversation
-	conversationID = uuid.New().String()
-	_, err = m.writeDB.Exec(`
+	// Always create a new conversation
+	// The caller should pass an existing conversation_id if they want to continue a conversation
+	conversationID := uuid.New().String()
+	_, err := m.writeDB.Exec(`
 		INSERT INTO conversations (id, user_id, session_id, product_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, conversationID, userID, sessionID, productID, time.Now(), time.Now())
@@ -74,6 +61,24 @@ func (m *Manager) GetOrCreateConversation(userID, sessionID, productID string) (
 	}
 
 	return conversationID, nil
+}
+
+// ValidateConversation checks if a conversation exists and belongs to the user.
+func (m *Manager) ValidateConversation(conversationID, userID string) (bool, error) {
+	if conversationID == "" || userID == "" {
+		return false, nil
+	}
+
+	var count int
+	err := m.readDB.QueryRow(`
+		SELECT COUNT(*) FROM conversations
+		WHERE id = ? AND user_id = ?
+	`, conversationID, userID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("validate conversation: %w", err)
+	}
+
+	return count > 0, nil
 }
 
 // AddMessage adds a message to the conversation history.

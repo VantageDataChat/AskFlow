@@ -85,29 +85,41 @@ func HandleQuery(app *App) http.HandlerFunc {
 				userID = "anon:" + anonymousID
 			}
 
-			// Get or create conversation
-			// IMPORTANT: Only reuse conversation if conversation_id is exptly provided
-			// Otherwise, always create a new conversation to ensure session isolation
+			convMgr := conversation.NewManager(app.readDB, app.db)
+
+			// Handle conversation ID
 			if req.ConversationID != "" {
-				conversationID = req.ConversationID
+				// Validate that the conversation belongs to this user
+				valid, _ := convMgr.ValidateConversation(req.ConversationID, userID)
+				if valid {
+					conversationID = req.ConversationID
+				} else {
+					// Invalid conversation_id, create new one
+					log.Printf("[Query] invalid conversation_id %s for user %s, creating new", req.ConversationID, userID)
+					conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
+				}
 			} else if userID != "" {
-				convMgr := conversation.NewManager(app.readDB, app.db)
+				// No conversation_id provided, create new conversation
 				conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
 			}
 
 			// Load conversation history
 			if conversationID != "" {
-				convMgr := conversation.NewManager(app.readDB, app.db)
 				maxHistory := cfg.Conversation.MaxHistoryMessages
 				if maxHistory <= 0 {
 					maxHistory = 10
 				}
-				messages, _ := convMgr.GetRecentMessages(conversationID, maxHistory)
-				for _, msg := range messages {
-					history = append(history, llm.HistoryMessage{
-						Role:    msg.Role,
-						Content: msg.Content,
-					})
+				messages, err := convMgr.GetRecentMessages(conversationID, maxHistory)
+				if err != nil {
+					log.Printf("[Query] failed to load conversation history: %v", err)
+				} else {
+					for _, msg := range messages {
+						history = append(history, llm.HistoryMessage{
+							Role:    msg.Role,
+							Content: msg.Content,
+						})
+					}
+					log.Printf("[Query] loaded %d history messages for conversation %s", len(history), conversationID)
 				}
 			}
 		}
