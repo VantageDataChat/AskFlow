@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"mime"
 	"net"
 	"net/smtp"
 	"strings"
@@ -173,8 +174,11 @@ func buildMessage(fromName, fromAddr, to, subject, body string) []byte {
 	to = sanitize(to)
 	subject = sanitize(subject)
 
+	// Encode non-ASCII characters in fromName using MIME Q-encoding
+	encodedFromName := mime.QEncoding.Encode("UTF-8", fromName)
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("From: %s <%s>\r\n", fromName, fromAddr))
+	sb.WriteString(fmt.Sprintf("From: %s <%s>\r\n", encodedFromName, fromAddr))
 	sb.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	sb.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	sb.WriteString("MIME-Version: 1.0\r\n")
