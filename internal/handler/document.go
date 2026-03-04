@@ -98,6 +98,10 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusInternalServerError, "config not loaded")
 			return
 		}
+
+		// Check media capabilities
+		capability := DetectMediaCapability(cfg)
+
 		maxUploadSizeMB := cfg.Video.MaxUploadSizeMB
 		maxUploadSize := int64(maxUploadSizeMB)<<20 + 10<<20 // file limit + 10MB overhead
 		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
@@ -129,6 +133,13 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 
 		// Determine file type from extension
 		fileType := DetectFileType(header.Filename)
+
+		// Validate file type is supported given current capabilities
+		supported, warning := ValidateFileTypeSupport(fileType, capability)
+		if !supported {
+			WriteError(w, http.StatusBadRequest, warning)
+			return
+		}
 
 		// Validate video files have correct magic bytes to prevent disguised uploads
 		switch fileType {
@@ -168,7 +179,20 @@ func HandleDocumentUpload(app *App) http.HandlerFunc {
 			WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		WriteJSON(w, http.StatusOK, doc)
+
+		// Add capability warning to response if present
+		response := map[string]interface{}{
+			"id":         doc.ID,
+			"name":       doc.Name,
+			"type":       doc.Type,
+			"status":     doc.Status,
+			"created_at": doc.CreatedAt,
+		}
+		if warning != "" {
+			response["warning"] = warning
+		}
+
+		WriteJSON(w, http.StatusOK, response)
 	}
 }
 

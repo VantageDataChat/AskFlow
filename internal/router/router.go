@@ -113,6 +113,7 @@ func Register(app *handler.App) func() {
 
 	// ── System ──
 	http.HandleFunc("/api/system/status", secure(handler.HandleSystemStatus(app)))
+	http.HandleFunc("/api/system/capability", secure(handler.HandleSystemCapability(app)))
 
 	// ── Health check ──
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
