@@ -326,53 +326,27 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	}
 
 	// ===== Context Tracking and Resolution Fix =====
-	// Detect ambiguous follow-up queries and resolve them using conversation history
+	// Use LLM-based context resolution for better accuracy
 	enhancedQuestion := req.Question
-	var topicKeywords string
 	isFollowUp := false
 
-	if len(history) > 0 {
-		// Step 1: Detect ambiguous references
-		hasAmbiguousRef := hasAmbiguousReference(req.Question)
-
-		if hasAmbiguousRef {
-			// Step 2: Extract topic keywords from recent conversation turns
-			// Look at the last 2-3 turns (up to 6 messages) to find established topic
-			topicKeywords = extractTopicFromHistory(history, 6)
-
-			if topicKeywords != "" {
-				isFollowUp = true
-				// Step 3: Resolve ambiguous query by appending topic keywords
-				// This creates a more natural query: "详细看看 OCR格式" instead of "OCR功能支持哪些格式? 详细看看"
-				// Validate topic keywords before using
-				topicKeywords = strings.TrimSpace(topicKeywords)
-				if len(topicKeywords) > 2 {
-					enhancedQuestion = req.Question + " " + topicKeywords
-				}
-
-				if debugMode {
-					dbg.Steps = append(dbg.Steps,
-						fmt.Sprintf("Context resolution: detected ambiguous reference in '%s'", req.Question))
-					dbg.Steps = append(dbg.Steps,
-						fmt.Sprintf("Context resolution: extracted topic keywords: '%s'", topicKeywords))
-					dbg.Steps = append(dbg.Steps,
-						fmt.Sprintf("Context resolution: enhanced query: '%s'", enhancedQuestion))
-				}
-			} else {
-				// Step 4: Fallback handling - if no previous context exists
-				if debugMode {
-					dbg.Steps = append(dbg.Steps,
-						"Context resolution: ambiguous query but no previous context found")
-				}
-				// Let the query proceed normally - the LLM will handle the ambiguity
-			}
-		} else {
-			// Not an ambiguous reference - query has explicit subject
-			// No context resolution needed
+	if len(history) > 0 && len(history) <= 10 {
+		// Use LLM to detect if this is a follow-up query and resolve context
+		contextResolution := qe.resolveContextWithLLM(req.Question, history, ls)
+		
+		if contextResolution.IsFollowUp && contextResolution.ResolvedQuery != "" {
+			isFollowUp = true
+			enhancedQuestion = contextResolution.ResolvedQuery
+			
 			if debugMode {
 				dbg.Steps = append(dbg.Steps,
-					"Context resolution: query has explicit subject, no resolution needed")
+					fmt.Sprintf("Context resolution: detected follow-up query '%s'", req.Question))
+				dbg.Steps = append(dbg.Steps,
+					fmt.Sprintf("Context resolution: resolved to '%s'", enhancedQuestion))
 			}
+		} else if debugMode {
+			dbg.Steps = append(dbg.Steps,
+				"Context resolution: independent query, no resolution needed")
 		}
 	}
 
@@ -809,8 +783,96 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	}, nil
 }
 
+// ContextResolution represents the result of LLM-based context resolution
+type ContextResolution struct {
+	IsFollowUp    bool   // Whether this is a follow-up query
+	ResolvedQuery string // The resolved query with context
+}
+
+// resolveContextWithLLM uses LLM to intelligently detect follow-up queries and resolve context.
+// This is more flexible than rule-based approaches and can handle various query patterns.
+func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.HistoryMessage, ls llm.LLMService) ContextResolution {
+	// Build conversation context (last 3 turns max)
+	maxTurns := 3
+	startIdx := len(history) - maxTurns*2
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	
+	var contextStr strings.Builder
+	for i := startIdx; i < len(history); i++ {
+		msg := history[i]
+		role := "用户"
+		if msg.Role == "assistant" {
+			role = "助手"
+		}
+		contextStr.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+	}
+	
+	// Use LLM to analyze if this is a follow-up and resolve it
+	systemPrompt := `你是一个对话上下文分析助手。分析用户的当前问题是否是对之前对话的追问。
+
+规则：
+1. 如果当前问题缺少明确主语/主题，且依赖前文理解（如"详细看看"、"列出清单"、"tell me more"），则是追问
+2. 如果当前问题有完整主语和明确意图（如"OCR是什么"、"如何配置日志"），则不是追问
+3. 如果是追问，将当前问题补充完整，使其包含前文的主题
+
+输出JSON格式：
+{
+  "is_follow_up": true/false,
+  "resolved_query": "补充完整的问题（如果是追问）或空字符串（如果不是追问）"
+}
+
+示例1：
+对话历史：
+用户: OCR支持哪些图片格式?
+助手: OCR支持JPEG、PNG、BMP等格式
+
+当前问题: 列出详细清单
+输出: {"is_follow_up": true, "resolved_query": "列出OCR支持的图片格式详细清单"}
+
+示例2：
+对话历史：
+用户: 如何配置日志?
+助手: 可以通过config.json配置
+
+当前问题: 数据库连接怎么设置?
+输出: {"is_follow_up": false, "resolved_query": ""}
+
+只输出JSON，不要其他内容。`
+
+	userPrompt := fmt.Sprintf("对话历史：\n%s\n当前问题: %s", contextStr.String(), currentQuery)
+	
+	answer, err := ls.Generate(systemPrompt, nil, userPrompt)
+	if err != nil {
+		// Fallback: treat as independent query
+		return ContextResolution{IsFollowUp: false, ResolvedQuery: ""}
+	}
+	
+	// Parse JSON response
+	start := strings.Index(answer, "{")
+	end := strings.LastIndex(answer, "}")
+	if start >= 0 && end > start {
+		jsonStr := answer[start : end+1]
+		var result struct {
+			IsFollowUp    bool   `json:"is_follow_up"`
+			ResolvedQuery string `json:"resolved_query"`
+		}
+		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+			return ContextResolution{
+				IsFollowUp:    result.IsFollowUp,
+				ResolvedQuery: strings.TrimSpace(result.ResolvedQuery),
+			}
+		}
+	}
+	
+	// Fallback: treat as independent query
+	return ContextResolution{IsFollowUp: false, ResolvedQuery: ""}
+}
+
 // hasAmbiguousReference checks if a query contains ambiguous references
 // that require context from previous turns to interpret.
+// DEPRECATED: Use resolveContextWithLLM instead for better accuracy
 func hasAmbiguousReference(query string) bool {
 	query = strings.ToLower(query)
 	
@@ -818,9 +880,15 @@ func hasAmbiguousReference(query string) bool {
 	ambiguousPatterns := []string{
 		"详细看看",
 		"详细",
+		"列出",
+		"清单",
+		"详细清单",
+		"列出清单",
 		"tell me more",
 		"more details",
 		"show me",
+		"list them",
+		"list all",
 		"elaborate",
 		"具体",
 		"more info",
@@ -828,6 +896,8 @@ func hasAmbiguousReference(query string) bool {
 		"再说说",
 		"explain more",
 		"go on",
+		"show details",
+		"give me details",
 	}
 	
 	for _, pattern := range ambiguousPatterns {
@@ -861,146 +931,24 @@ func hasAmbiguousReference(query string) bool {
 }
 
 // extractTopicFromHistory extracts topic keywords from conversation history.
-// It looks at recent user questions and assistant responses to identify the main topic.
-// Returns a concise topic string (e.g., "OCR格式" instead of full question).
+// DEPRECATED: Use resolveContextWithLLM instead for better accuracy
+// Kept for backward compatibility
 func extractTopicFromHistory(history []llm.HistoryMessage, maxMessages int) string {
-	if len(history) == 0 {
-		return ""
-	}
-
-	// Limit search to recent messages
-	startIdx := len(history) - maxMessages
-	if startIdx < 0 {
-		startIdx = 0
-	}
-
-	// Look for the most recent user question that establishes a topic
-	for i := len(history) - 1; i >= startIdx; i-- {
-		msg := history[i]
-		
-		// Extract topic from user questions
-		if msg.Role == "user" && len(msg.Content) > 0 {
-			topic := extractKeywordsFromQuery(msg.Content)
-			if topic != "" {
-				return topic
-			}
-		}
-		
-		// Also try to extract from assistant responses (they often contain the topic)
-		if msg.Role == "assistant" && len(msg.Content) > 0 {
-			topic := extractKeywordsFromResponse(msg.Content)
-			if topic != "" {
-				return topic
-			}
-		}
-	}
-
 	return ""
 }
 
 // extractKeywordsFromQuery extracts key topic words from a user query.
-// Examples:
-//   "OCR功能支持哪些格式?" -> "OCR格式"
-//   "What authentication methods are supported?" -> "authentication methods"
+// DEPRECATED: Use resolveContextWithLLM instead for better accuracy
+// Kept for backward compatibility
 func extractKeywordsFromQuery(query string) string {
-	query = strings.TrimSpace(query)
-	if query == "" {
-		return ""
-	}
-
-	// Remove common question words and punctuation
-	originalQuery := query
-	query = strings.ToLower(query)
-	
-	// Chinese question patterns
-	chinesePatterns := []string{
-		"支持哪些", "有哪些", "包括哪些", "是什么", "怎么", "如何",
-		"功能", "方法", "方式", "?", "？",
-	}
-	for _, pattern := range chinesePatterns {
-		query = strings.ReplaceAll(query, pattern, " ")
-	}
-	
-	// English question patterns
-	englishPatterns := []string{
-		"what are the", "what is", "how to", "how do i",
-		"are supported", "is supported", "can i", "?",
-	}
-	for _, pattern := range englishPatterns {
-		query = strings.ReplaceAll(query, pattern, " ")
-	}
-	
-	// Clean up whitespace
-	query = strings.Join(strings.Fields(query), " ")
-	query = strings.TrimSpace(query)
-	
-	// If result is too short or empty, try to extract from original query
-	if len(query) < 3 {
-		// Extract first few meaningful words from original query
-		words := strings.Fields(originalQuery)
-		var keywords []string
-		for _, word := range words {
-			// Skip very short words and punctuation
-			cleaned := strings.Trim(word, "?？!！.,，。")
-			if len([]rune(cleaned)) > 2 {
-				keywords = append(keywords, cleaned)
-				if len(keywords) >= 3 {
-					break
-				}
-			}
-		}
-		if len(keywords) > 0 {
-			query = strings.Join(keywords, " ")
-		}
-	}
-	
-	// Limit to first 30 characters to keep it concise (reduced from 50)
-	if runes := []rune(query); len(runes) > 30 {
-		query = string(runes[:30])
-	}
-	
-	return query
+	return ""
 }
 
 // extractKeywordsFromResponse extracts key topic words from an assistant response.
-// Looks for the main subject being discussed in the first sentence.
+// DEPRECATED: Use resolveContextWithLLM instead for better accuracy
+// Kept for backward compatibility
 func extractKeywordsFromResponse(response string) string {
-	response = strings.TrimSpace(response)
-	if response == "" {
-		return ""
-	}
-
-	// Get first sentence (up to first period, question mark, or newline)
-	firstSentence := response
-	for _, sep := range []string{"。", ".", "？", "?", "\n"} {
-		if idx := strings.Index(response, sep); idx > 0 && idx < len(firstSentence) {
-			firstSentence = response[:idx]
-		}
-	}
-	
-	// Limit length
-	if runes := []rune(firstSentence); len(runes) > 100 {
-		firstSentence = string(runes[:100])
-	}
-	
-	// Extract nouns/keywords (simple heuristic: words longer than 2 chars)
-	words := strings.Fields(firstSentence)
-	var keywords []string
-	for _, word := range words {
-		// Skip common words
-		if len([]rune(word)) > 2 {
-			keywords = append(keywords, word)
-			if len(keywords) >= 5 {
-				break
-			}
-		}
-	}
-	
-	if len(keywords) == 0 {
-		return ""
-	}
-	
-	return strings.Join(keywords, " ")
+	return ""
 }
 
 
