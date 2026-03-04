@@ -422,12 +422,21 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 	textMatchEnabled := cfg != nil && cfg.Vector.TextMatchEnabled
 
 	if textMatchEnabled && req.ImageData == "" {
+		// Use enhanced question for text matching if available
+		searchQuery := req.Question
+		if enhancedQuestion != req.Question {
+			searchQuery = enhancedQuestion
+			if debugMode {
+				dbg.Steps = append(dbg.Steps, fmt.Sprintf("TextMatch: using enhanced query '%s'", searchQuery))
+			}
+		}
+		
 		if debugMode {
 			dbg.Steps = append(dbg.Steps, "TextMatch: Level 1 — text-based matching (no API cost)")
 		}
 
 		// Level 1: Text-based search against chunk cache
-		textResults, textErr := qe.vectorStore.TextSearch(req.Question, 3, 0.65, req.ProductID)
+		textResults, textErr := qe.vectorStore.TextSearch(searchQuery, 3, 0.65, req.ProductID)
 		if textErr == nil && len(textResults) > 0 && textResults[0].Score >= 0.75 {
 			log.Printf("[Query] Level 1 text match hit: score=%.4f doc=%q", textResults[0].Score, textResults[0].DocumentName)
 			if debugMode {
@@ -451,7 +460,7 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 			if debugMode {
 				dbg.Steps = append(dbg.Steps, "TextMatch: Level 2 — confirming with embedding (embedding API only)")
 			}
-			queryVector, embErr := qe.cachedEmbed(req.Question, es)
+			queryVector, embErr := qe.cachedEmbed(searchQuery, es)
 			if embErr == nil {
 				vecResults, vecErr := qe.vectorStore.Search(queryVector, cfg.Vector.TopK, cfg.Vector.Threshold, req.ProductID)
 				if vecErr == nil && len(vecResults) > 0 && vecResults[0].Score >= 0.75 {
