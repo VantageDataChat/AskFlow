@@ -14,6 +14,10 @@ data/config.json
 data/images/
 internal/document/data/uploads/
 
+# Logs
+logs/
+*.log
+
 # IDE
 .vscode/
 
