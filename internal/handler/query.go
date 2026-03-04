@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"askflow/internal/conversation"
 	"askflow/internal/errlog"
@@ -99,8 +100,17 @@ func HandleQuery(app *App) http.HandlerFunc {
 					conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
 				}
 			} else if userID != "" {
-				// No conversation_id provided, create new conversation
-				conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
+				// No conversation_id provided, try to auto-link to recent conversation
+				// This is a temporary workaround for frontend not passing conversation_id
+				recentConvID, _ := convMgr.GetMostRecentConversation(userID, req.ProductID, 5*time.Minute)
+				if recentConvID != "" {
+					conversationID = recentConvID
+					log.Printf("[Query] auto-linked to recent conversation %s (age < 5min)", conversationID)
+				} else {
+					// No recent conversation, create new one
+					conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
+					log.Printf("[Query] created new conversation %s", conversationID)
+				}
 			}
 
 			// Load conversation history

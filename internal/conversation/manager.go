@@ -175,3 +175,30 @@ func (m *Manager) CleanOldConversations(olderThan time.Duration) error {
 	}
 	return nil
 }
+
+
+// GetMostRecentConversation retrieves the most recent conversation for a user and product.
+// This is used for auto-linking when the frontend doesn't provide a conversation_id.
+func (m *Manager) GetMostRecentConversation(userID, productID string, maxAge time.Duration) (string, error) {
+	if userID == "" {
+		return "", nil
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	var conversationID string
+	err := m.readDB.QueryRow(`
+		SELECT id FROM conversations
+		WHERE user_id = ? AND product_id = ? AND updated_at > ?
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`, userID, productID, cutoff).Scan(&conversationID)
+	
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("query recent conversation: %w", err)
+	}
+
+	return conversationID, nil
+}

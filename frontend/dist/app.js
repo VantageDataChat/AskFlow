@@ -229,6 +229,8 @@
     function clearSession() {
         localStorage.removeItem(SESSION_KEY);
         localStorage.removeItem(USER_KEY);
+        // Clear conversation_id when session is cleared
+        localStorage.removeItem('askflow_conversation_id');
     }
 
     function getUser() {
@@ -1062,6 +1064,8 @@
                         }
                         // Clear chat and load new welcome message
                         chatMessages = [];
+                        // Clear conversation_id when switching products
+                        localStorage.removeItem('askflow_conversation_id');
                         loadWelcomeMessage();
                     });
                 }
@@ -2139,6 +2143,11 @@
         if (imageData) {
             reqBody.image_data = imageData;
         }
+        // Include conversation_id for multi-turn context
+        var conversationId = localStorage.getItem('askflow_conversation_id');
+        if (conversationId) {
+            reqBody.conversation_id = conversationId;
+        }
 
         // Call API
         var token = getChatToken();
@@ -2175,6 +2184,11 @@
             return res.json();
         })
         .then(function (data) {
+            // Save conversation_id for multi-turn context
+            if (data.conversation_id) {
+                localStorage.setItem('askflow_conversation_id', data.conversation_id);
+            }
+            
             var msg = {
                 role: 'system',
                 content: data.answer || data.message || i18n.t('chat_no_answer'),
@@ -5853,6 +5867,8 @@
         cachedProducts = null;
         _productFetchPromise = null;
         _productFetchMode = null;
+        // Clear conversation_id on logout
+        localStorage.removeItem('askflow_conversation_id');
         clearSession();
         clearAdminSession();
         navigate('/login');
