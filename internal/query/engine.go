@@ -332,7 +332,7 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 
 	if len(history) > 0 && len(history) <= 10 {
 		// Use LLM to detect if this is a follow-up query and resolve context
-		contextResolution := qe.resolveContextWithLLM(req.Question, history, ls)
+		contextResolution := qe.resolveContextWithLLM(req.Question, history, ls, debugMode, dbg)
 		
 		if contextResolution.IsFollowUp && contextResolution.ResolvedQuery != "" {
 			isFollowUp = true
@@ -800,7 +800,7 @@ type ContextResolution struct {
 
 // resolveContextWithLLM uses LLM to intelligently detect follow-up queries and resolve context.
 // This is more flexible than rule-based approaches and can handle various query patterns.
-func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.HistoryMessage, ls llm.LLMService) ContextResolution {
+func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.HistoryMessage, ls llm.LLMService, debugMode bool, dbg *DebugInfo) ContextResolution {
 	// Build conversation context (last 3 turns max)
 	maxTurns := 3
 	startIdx := len(history) - maxTurns*2
@@ -865,10 +865,24 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 
 	userPrompt := fmt.Sprintf("对话历史：\n%s\n当前问题: %s", contextStr.String(), currentQuery)
 	
+	// Log the prompts in debug mode
+	if debugMode && dbg != nil {
+		dbg.Steps = append(dbg.Steps, "=== LLM Context Resolution ===")
+		dbg.Steps = append(dbg.Steps, fmt.Sprintf("System Prompt: %s", systemPrompt[:200]+"..."))
+		dbg.Steps = append(dbg.Steps, fmt.Sprintf("User Prompt: %s", userPrompt))
+	}
+	
 	answer, err := ls.Generate(systemPrompt, nil, userPrompt)
 	if err != nil {
+		if debugMode && dbg != nil {
+			dbg.Steps = append(dbg.Steps, fmt.Sprintf("LLM Error: %v", err))
+		}
 		// Fallback: treat as independent query
 		return ContextResolution{IsFollowUp: false, ResolvedQuery: ""}
+	}
+	
+	if debugMode && dbg != nil {
+		dbg.Steps = append(dbg.Steps, fmt.Sprintf("LLM Response: %s", answer))
 	}
 	
 	// Parse JSON response
@@ -881,11 +895,18 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 			ResolvedQuery string `json:"resolved_query"`
 		}
 		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+			if debugMode && dbg != nil {
+				dbg.Steps = append(dbg.Steps, fmt.Sprintf("Parsed: is_follow_up=%v, resolved_query='%s'", result.IsFollowUp, result.ResolvedQuery))
+			}
 			return ContextResolution{
 				IsFollowUp:    result.IsFollowUp,
 				ResolvedQuery: strings.TrimSpace(result.ResolvedQuery),
 			}
+		} else if debugMode && dbg != nil {
+			dbg.Steps = append(dbg.Steps, fmt.Sprintf("JSON Parse Error: %v", err))
 		}
+	} else if debugMode && dbg != nil {
+		dbg.Steps = append(dbg.Steps, "No JSON found in LLM response")
 	}
 	
 	// Fallback: treat as independent query
