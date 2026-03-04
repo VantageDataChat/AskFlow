@@ -815,7 +815,12 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 规则：
 1. 如果当前问题缺少明确主语/主题，且依赖前文理解（如"详细看看"、"列出清单"、"tell me more"），则是追问
 2. 如果当前问题有完整主语和明确意图（如"OCR是什么"、"如何配置日志"），则不是追问
-3. 如果是追问，将当前问题补充完整，使其包含前文的主题
+3. 如果是追问，将当前问题补充完整，使其包含前文的**核心主题和关键词**，确保补充后的问题能准确检索到相关文档
+
+重要：补充问题时必须：
+- 保留原问题的意图（如"列出"、"详细"等）
+- 明确指出具体的主题（如"OCR图片格式"而不是"格式"）
+- 包含关键限定词（如"图片"、"图像"等，避免歧义）
 
 输出JSON格式：
 {
@@ -838,6 +843,14 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 
 当前问题: 数据库连接怎么设置?
 输出: {"is_follow_up": false, "resolved_query": ""}
+
+示例3：
+对话历史：
+用户: OCR支持哪些图片格式?
+助手: OCR程序使用QmImgUtil图片读取库，支持JPEG、PNG、BMP等格式
+
+当前问题: 列出详细格式
+输出: {"is_follow_up": true, "resolved_query": "列出OCR程序支持的图片图像格式详细清单"}
 
 只输出JSON，不要其他内容。`
 
