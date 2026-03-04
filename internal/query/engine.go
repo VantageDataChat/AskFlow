@@ -548,6 +548,29 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		}
 	}
 
+	// Step 2.3: Context-aware re-ranking for follow-up questions
+	// Boost documents that match keywords from the conversation context
+	if isFollowUp && len(results) > 1 && len(history) > 0 {
+		// Extract context keywords from the last user question and assistant response
+		contextKeywords := qe.extractContextKeywords(history, debugMode, dbg)
+		
+		if len(contextKeywords) > 0 {
+			// Re-rank results based on context keyword matching
+			results = qe.reRankByContext(results, contextKeywords, debugMode, dbg)
+			
+			if debugMode {
+				dbg.Steps = append(dbg.Steps, fmt.Sprintf("Step 2.3: re-ranked results by context keywords: %v", contextKeywords))
+				dbg.Steps = append(dbg.Steps, "Step 2.3: top results after re-ranking:")
+				for i, r := range results {
+					if i >= 3 {
+						break
+					}
+					dbg.Steps = append(dbg.Steps, fmt.Sprintf("  [%d] score=%.4f doc=%q", i, r.Score, r.DocumentName))
+				}
+			}
+		}
+	}
+
 	// Step 2.5: If image provided, also search with image embedding and merge results
 	var imgVec []float64
 	if req.ImageData != "" {
@@ -824,12 +847,13 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 规则：
 1. 如果当前问题缺少明确主语/主题，且依赖前文理解（如"详细看看"、"列出清单"、"tell me more"），则是追问
 2. 如果当前问题有完整主语和明确意图（如"OCR是什么"、"如何配置日志"），则不是追问
-3. 如果是追问，将当前问题补充完整，使其包含前文的**核心主题和关键词**，确保补充后的问题能准确检索到相关文档
+3. 如果是追问，将当前问题补充完整，使其包含前文的**核心主题和所有关键限定词**，确保补充后的问题能准确检索到相关文档
 
-重要：补充问题时必须：
+**关键要求**：补充问题时必须：
 - 保留原问题的意图（如"列出"、"详细"等）
-- 明确指出具体的主题（如"OCR图片格式"而不是"格式"）
-- 包含关键限定词（如"图片"、"图像"等，避免歧义）
+- 明确指出具体的主题，包含**所有**关键限定词和上下文词汇
+- 特别注意：如果前文提到"OCR图片格式"，补充时必须包含"OCR"+"图片"/"图像"等多个限定词，避免与"文件格式"、"编程语言格式"等混淆
+- 从助手的回答中提取核心主题词（如"QmImgUtil"、"图片读取库"等），加入补充问题中增强特异性
 
 输出JSON格式：
 {
@@ -843,7 +867,7 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 助手: OCR支持JPEG、PNG、BMP等格式
 
 当前问题: 列出详细清单
-输出: {"is_follow_up": true, "resolved_query": "列出OCR支持的图片格式详细清单"}
+输出: {"is_follow_up": true, "resolved_query": "列出OCR支持的图片图像格式详细清单"}
 
 示例2：
 对话历史：
@@ -859,7 +883,16 @@ func (qe *QueryEngine) resolveContextWithLLM(currentQuery string, history []llm.
 助手: OCR程序使用QmImgUtil图片读取库，支持JPEG、PNG、BMP等格式
 
 当前问题: 列出详细格式
-输出: {"is_follow_up": true, "resolved_query": "列出OCR程序支持的图片图像格式详细清单"}
+输出: {"is_follow_up": true, "resolved_query": "列出OCR程序QmImgUtil支持的图片图像格式详细清单"}
+
+示例4（反例-避免歧义）：
+对话历史：
+用户: OCR功能支持哪些格式?
+助手: OCR程序使用QmImgUtil图片读取库读取图片，支持的格式与该库完全一致
+
+当前问题: 详细看看
+错误输出: {"is_follow_up": true, "resolved_query": "详细看看支持的格式"} ❌ 太模糊，会匹配到文件格式
+正确输出: {"is_follow_up": true, "resolved_query": "详细看看OCR程序QmImgUtil图片读取库支持的图片图像格式"} ✓ 包含足够的限定词
 
 只输出JSON，不要其他内容。`
 
@@ -1458,4 +1491,150 @@ func (qe *QueryEngine) buildSourceRefs(results []vectorstore.SearchResult) []Sou
 		}
 	}
 	return sources
+}
+
+
+// extractContextKeywords extracts important keywords from conversation history
+// to help re-rank search results for follow-up questions.
+func (qe *QueryEngine) extractContextKeywords(history []llm.HistoryMessage, debugMode bool, dbg *DebugInfo) []string {
+	if len(history) == 0 {
+		return nil
+	}
+	
+	// Get the last user question and assistant response
+	var lastUserMsg, lastAssistantMsg string
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Role == "user" && lastUserMsg == "" {
+			lastUserMsg = history[i].Content
+		} else if history[i].Role == "assistant" && lastAssistantMsg == "" {
+			lastAssistantMsg = history[i].Content
+		}
+		if lastUserMsg != "" && lastAssistantMsg != "" {
+			break
+		}
+	}
+	
+	if lastUserMsg == "" {
+		return nil
+	}
+	
+	// Extract keywords using simple heuristics
+	// Focus on nouns and technical terms that are likely to be discriminating
+	keywords := make(map[string]bool)
+	
+	// Common technical terms and domain-specific keywords
+	technicalTerms := []string{
+		"OCR", "QmImgUtil", "图片", "图像", "格式", "文件",
+		"视频", "音频", "文档", "数据库", "配置", "日志",
+		"认证", "授权", "API", "接口", "服务", "模块",
+		"image", "video", "audio", "document", "database", "config",
+		"authentication", "authorization", "service", "module",
+	}
+	
+	// Extract from user question
+	for _, term := range technicalTerms {
+		if strings.Contains(lastUserMsg, term) {
+			keywords[term] = true
+		}
+	}
+	
+	// Extract from assistant response (first 200 chars for efficiency)
+	responsePrefix := lastAssistantMsg
+	if len(responsePrefix) > 200 {
+		responsePrefix = responsePrefix[:200]
+	}
+	for _, term := range technicalTerms {
+		if strings.Contains(responsePrefix, term) {
+			keywords[term] = true
+		}
+	}
+	
+	// Convert to slice
+	result := make([]string, 0, len(keywords))
+	for k := range keywords {
+		result = append(result, k)
+	}
+	
+	if debugMode && dbg != nil && len(result) > 0 {
+		dbg.Steps = append(dbg.Steps, fmt.Sprintf("Extracted context keywords: %v", result))
+	}
+	
+	return result
+}
+
+// reRankByContext re-ranks search results by boosting documents that contain context keywords.
+// This helps ensure that follow-up questions retrieve documents relevant to the conversation context.
+func (qe *QueryEngine) reRankByContext(results []vectorstore.SearchResult, contextKeywords []string, debugMode bool, dbg *DebugInfo) []vectorstore.SearchResult {
+	if len(results) == 0 || len(contextKeywords) == 0 {
+		return results
+	}
+	
+	// Score each result based on context keyword matches
+	type scoredResult struct {
+		result       vectorstore.SearchResult
+		contextScore float64
+		matchedKWs   []string
+	}
+	
+	scored := make([]scoredResult, len(results))
+	for i, r := range results {
+		score := 0.0
+		matched := make([]string, 0)
+		
+		// Check document name and chunk text for keyword matches
+		searchText := strings.ToLower(r.DocumentName + " " + r.ChunkText)
+		
+		for _, kw := range contextKeywords {
+			kwLower := strings.ToLower(kw)
+			if strings.Contains(searchText, kwLower) {
+				// Boost score based on keyword importance
+				// OCR, QmImgUtil, and other specific terms get higher boost
+				boost := 0.1
+				if len(kw) > 3 || strings.Contains(kw, "OCR") || strings.Contains(kw, "Util") {
+					boost = 0.15
+				}
+				score += boost
+				matched = append(matched, kw)
+			}
+		}
+		
+		scored[i] = scoredResult{
+			result:       r,
+			contextScore: score,
+			matchedKWs:   matched,
+		}
+	}
+	
+	// Sort by: context score (descending), then original vector score (descending)
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].contextScore != scored[j].contextScore {
+			return scored[i].contextScore > scored[j].contextScore
+		}
+		return scored[i].result.Score > scored[j].result.Score
+	})
+	
+	// Log re-ranking details in debug mode
+	if debugMode && dbg != nil {
+		dbg.Steps = append(dbg.Steps, "Context-based re-ranking details:")
+		for i, s := range scored {
+			if i >= 5 {
+				break
+			}
+			if s.contextScore > 0 {
+				dbg.Steps = append(dbg.Steps, fmt.Sprintf("  [%d] doc=%q vector_score=%.4f context_score=%.2f matched_kws=%v",
+					i, s.result.DocumentName, s.result.Score, s.contextScore, s.matchedKWs))
+			} else {
+				dbg.Steps = append(dbg.Steps, fmt.Sprintf("  [%d] doc=%q vector_score=%.4f (no context match)",
+					i, s.result.DocumentName, s.result.Score))
+			}
+		}
+	}
+	
+	// Extract re-ranked results
+	reranked := make([]vectorstore.SearchResult, len(scored))
+	for i, s := range scored {
+		reranked[i] = s.result
+	}
+	
+	return reranked
 }
