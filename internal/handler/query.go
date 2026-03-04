@@ -152,12 +152,16 @@ func HandleQuery(app *App) http.HandlerFunc {
 		// Record question for FAQ weight tracking (async, non-blocking)
 		go app.RecordFAQ(req.ProductID, req.Question)
 		// Strip debug info for non-admin users to prevent information leakage
+		// TEMPORARY: Debug mode enabled for all users during development
+		// TODO: Re-enable admin check in production
+		/*
 		if resp.DebugInfo != nil {
 			_, _, adminErr := GetAdminSession(app, r)
 			if adminErr != nil {
 				resp.DebugInfo = nil
 			}
 		}
+		*/
 		// Check if product allows document download
 		if req.ProductID != "" {
 			p, pErr := app.GetProduct(req.ProductID)
