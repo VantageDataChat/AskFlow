@@ -88,28 +88,35 @@ func HandleQuery(app *App) http.HandlerFunc {
 
 			convMgr := conversation.NewManager(app.readDB, app.db)
 
+			log.Printf("[Query] userID=%s, sessionID=%s, productID=%s", userID, sessionID, req.ProductID)
+
 			// Handle conversation ID
 			if req.ConversationID != "" {
+				log.Printf("[Query] frontend provided conversation_id=%s", req.ConversationID)
 				// Validate that the conversation belongs to this user
 				valid, _ := convMgr.ValidateConversation(req.ConversationID, userID)
 				if valid {
 					conversationID = req.ConversationID
+					log.Printf("[Query] validated conversation_id=%s", conversationID)
 				} else {
 					// Invalid conversation_id, create new one
 					log.Printf("[Query] invalid conversation_id %s for user %s, creating new", req.ConversationID, userID)
 					conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
 				}
-			} else if userID != "" {
-				// No conversation_id provided, try to auto-link to recent conversation
-				// This is a temporary workaround for frontend not passing conversation_id
-				recentConvID, _ := convMgr.GetMostRecentConversation(userID, req.ProductID, 5*time.Minute)
-				if recentConvID != "" {
-					conversationID = recentConvID
-					log.Printf("[Query] auto-linked to recent conversation %s (age < 5min)", conversationID)
-				} else {
-					// No recent conversation, create new one
-					conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
-					log.Printf("[Query] created new conversation %s", conversationID)
+			} else {
+				log.Printf("[Query] no conversation_id from frontend, checking for recent conversation")
+				if userID != "" {
+					// No conversation_id provided, try to auto-link to recent conversation
+					// This is a temporary workaround for frontend not passing conversation_id
+					recentConvID, _ := convMgr.GetMostRecentConversation(userID, req.ProductID, 5*time.Minute)
+					if recentConvID != "" {
+						conversationID = recentConvID
+						log.Printf("[Query] auto-linked to recent conversation %s (age < 5min)", conversationID)
+					} else {
+						// No recent conversation, create new one
+						conversationID, _ = convMgr.GetOrCreateConversation(userID, sessionID, req.ProductID)
+						log.Printf("[Query] created new conversation %s", conversationID)
+					}
 				}
 			}
 
@@ -157,7 +164,11 @@ func HandleQuery(app *App) http.HandlerFunc {
 		if conversationEnabled && conversationID != "" {
 			convMgr := conversation.NewManager(app.readDB, app.db)
 			// Save user question
-			_ = convMgr.AddMessage(conversationID, "user", req.Question, req.ImageData, nil)
+			if err := convMgr.AddMessage(conversationID, "user", req.Question, req.ImageData, nil); err != nil {
+				log.Printf("[Query] WARNING: failed to save user message: %v", err)
+			} else {
+				log.Printf("[Query] saved user message to conversation %s", conversationID)
+			}
 			// Save assistant answer
 			sources := make([]conversation.SourceRef, len(resp.Sources))
 			for i, s := range resp.Sources {
@@ -166,8 +177,13 @@ func HandleQuery(app *App) http.HandlerFunc {
 					ChunkIndex:   s.ChunkIndex,
 				}
 			}
-			_ = convMgr.AddMessage(conversationID, "assistant", resp.Answer, "", sources)
+			if err := convMgr.AddMessage(conversationID, "assistant", resp.Answer, "", sources); err != nil {
+				log.Printf("[Query] WARNING: failed to save assistant message: %v", err)
+			} else {
+				log.Printf("[Query] saved assistant message to conversation %s", conversationID)
+			}
 			resp.ConversationID = conversationID
+			log.Printf("[Query] returning conversation_id=%s to frontend", conversationID)
 		}
 
 		// Record question for FAQ weight tracking (async, non-blocking)
