@@ -406,12 +406,21 @@ body {
     font-size: 0.875rem;
     color: var(--color-text);
     cursor: pointer;
+    flex-wrap: wrap;
 }
 
 .admin-checkbox-label input[type="checkbox"] {
     width: auto;
     margin: 0;
     cursor: pointer;
+}
+
+.admin-checkbox-label small {
+    width: 100%;
+    color: #999;
+    font-size: 0.75rem;
+    margin-top: 0.125rem;
+    padding-left: 1.5rem;
 }
 
 /* Knowledge image upload zone */
