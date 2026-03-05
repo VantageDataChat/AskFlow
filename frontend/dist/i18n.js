@@ -109,6 +109,10 @@
 
             // Chat page
             'chat_title': 'Askflow客户自服务系统',
+            'conversation_enabled': '多轮对话',
+            'conversation_disabled': '单轮对话',
+            'conversation_enabled_hint': '已启用多轮对话，支持上下文关联查询',
+            'conversation_disabled_hint': '多轮对话未启用，每次查询独立处理',
             'chat_login_btn': '登录',
             'chat_logout_btn': '退出登录',
             'chat_all_products': '全部产品',
@@ -865,6 +869,10 @@
 
             // Chat page
             'chat_title': 'Askflow Customer Self-Service',
+            'conversation_enabled': 'Multi-turn',
+            'conversation_disabled': 'Single-turn',
+            'conversation_enabled_hint': 'Multi-turn conversation enabled, supports context-aware queries',
+            'conversation_disabled_hint': 'Multi-turn conversation disabled, each query is independent',
             'chat_login_btn': 'Sign In',
             'chat_logout_btn': 'Sign Out',
             'chat_all_products': 'All Products',

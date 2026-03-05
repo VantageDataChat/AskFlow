@@ -1203,11 +1203,32 @@
                         timestamp: Date.now()
                     });
                 }
+                // Update conversation status badge
+                updateConversationStatus(data.conversation_enabled);
                 renderChatMessages();
             })
             .catch(function () {
                 renderChatMessages();
             });
+    }
+
+    // Update conversation status badge in chat header
+    function updateConversationStatus(enabled) {
+        var badge = document.getElementById('conversation-status-badge');
+        var text = document.getElementById('conversation-status-text');
+        if (!badge || !text) return;
+        
+        badge.classList.remove('hidden', 'enabled', 'disabled');
+        
+        if (enabled) {
+            badge.classList.add('enabled');
+            text.textContent = i18n.t('conversation_enabled');
+            badge.title = i18n.t('conversation_enabled_hint');
+        } else {
+            badge.classList.add('disabled');
+            text.textContent = i18n.t('conversation_disabled');
+            badge.title = i18n.t('conversation_disabled_hint');
+        }
     }
 
     // Toggle user profile dropdown

@@ -261,14 +261,23 @@ func HandleDefaultProduct(app *App) http.HandlerFunc {
 	}
 }
 
-// HandleProductIntro returns the product introduction/welcome message.
+// HandleProductIntro returns the product introduction/welcome message and conversation status.
 func HandleProductIntro(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		
+		cfg := app.configManager.Get()
+		systemConversationEnabled := cfg != nil && cfg.Conversation.Enabled
+		
 		productID := r.URL.Query().Get("product_id")
+		response := map[string]interface{}{
+			"product_intro": "",
+			"conversation_enabled": false,
+		}
+		
 		if productID != "" {
 			if !IsValidOptionalID(productID) {
 				WriteError(w, http.StatusBadRequest, "invalid product_id")
@@ -280,18 +289,20 @@ func HandleProductIntro(app *App) http.HandlerFunc {
 				if intro == "" {
 					intro = p.Description
 				}
-				if intro != "" {
-					WriteJSON(w, http.StatusOK, map[string]string{"product_intro": intro})
-					return
-				}
+				response["product_intro"] = intro
+				// Conversation is enabled only if both system and product settings are enabled
+				response["conversation_enabled"] = systemConversationEnabled && p.ConversationEnabled
+				WriteJSON(w, http.StatusOK, response)
+				return
 			}
 		}
-		cfg := app.configManager.Get()
-		var intro string
+		
+		// No specific product, return system intro and system conversation status
 		if cfg != nil {
-			intro = cfg.ProductIntro
+			response["product_intro"] = cfg.ProductIntro
 		}
-		WriteJSON(w, http.StatusOK, map[string]string{"product_intro": intro})
+		response["conversation_enabled"] = systemConversationEnabled
+		WriteJSON(w, http.StatusOK, response)
 	}
 }
 
