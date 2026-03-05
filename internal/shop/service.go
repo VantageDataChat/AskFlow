@@ -41,7 +41,8 @@ func generateID() (string, error) {
 
 // findOrCreateProduct creates a new product or returns an existing one if the name is taken.
 func (s *ShopService) findOrCreateProduct(name, welcomeMsg string) (*product.Product, error) {
-	p, err := s.productSvc.Create(name, product.ProductTypeKnowledgeBase, welcomeMsg, welcomeMsg, false)
+	// For shop-created products, conversation is disabled by default (can be enabled later by admin)
+	p, err := s.productSvc.Create(name, product.ProductTypeKnowledgeBase, welcomeMsg, welcomeMsg, false, false)
 	if err != nil && strings.Contains(err.Error(), "already exists") {
 		// Product name taken — find and reuse the existing one
 		existing, lookupErr := s.productSvc.GetByName(name)
