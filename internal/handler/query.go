@@ -63,6 +63,11 @@ func HandleQuery(app *App) http.HandlerFunc {
 
 		// Conversation history handling
 		cfg := app.configManager.Get()
+		if cfg == nil {
+			log.Printf("[Query] WARNING: config is nil, conversation will be disabled")
+		} else {
+			log.Printf("[Query] config loaded: conversation.enabled=%v", cfg.Conversation.Enabled)
+		}
 		conversationEnabled := cfg != nil && cfg.Conversation.Enabled
 		var conversationID string
 		var history []llm.HistoryMessage
