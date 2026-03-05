@@ -1378,6 +1378,15 @@ a.chat-source-download:hover {
 
     .chat-header { padding: 0.625rem 1rem; }
     .chat-header-title { font-size: 0.9375rem; }
+    
+    /* Hide conversation status text on mobile, keep icon only */
+    .conversation-status-badge {
+        padding: 0.25rem;
+    }
+    .conversation-status-badge #conversation-status-text {
+        display: none;
+    }
+    
     .chat-messages { padding: 1rem; }
     .chat-msg { max-width: 88%; }
     .chat-input-area { padding: 0.5rem 0.75rem 0.75rem; }

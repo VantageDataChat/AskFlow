@@ -1204,10 +1204,13 @@
                     });
                 }
                 // Update conversation status badge
-                updateConversationStatus(data.conversation_enabled);
+                updateConversationStatus(data.conversation_enabled || false);
                 renderChatMessages();
             })
-            .catch(function () {
+            .catch(function (err) {
+                console.error('Failed to load welcome message:', err);
+                // Default to disabled on error
+                updateConversationStatus(false);
                 renderChatMessages();
             });
     }

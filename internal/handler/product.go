@@ -284,7 +284,10 @@ func HandleProductIntro(app *App) http.HandlerFunc {
 				return
 			}
 			p, err := app.GetProduct(productID)
-			if err == nil && p != nil {
+			if err != nil {
+				// Log error but continue with system defaults
+				log.Printf("[ProductIntro] WARNING: failed to get product %s: %v (using system defaults)", productID, err)
+			} else if p != nil {
 				intro := p.WelcomeMessage
 				if intro == "" {
 					intro = p.Description
@@ -297,7 +300,7 @@ func HandleProductIntro(app *App) http.HandlerFunc {
 			}
 		}
 		
-		// No specific product, return system intro and system conversation status
+		// No specific product or product not found, return system intro and system conversation status
 		if cfg != nil {
 			response["product_intro"] = cfg.ProductIntro
 		}
