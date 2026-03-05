@@ -68,7 +68,22 @@ func HandleQuery(app *App) http.HandlerFunc {
 		} else {
 			log.Printf("[Query] config loaded: conversation.enabled=%v", cfg.Conversation.Enabled)
 		}
+		
+		// Check both system-level and product-level conversation settings
 		conversationEnabled := cfg != nil && cfg.Conversation.Enabled
+		if conversationEnabled && req.ProductID != "" {
+			// Check product-level conversation setting
+			product, err := app.productService.GetByID(req.ProductID)
+			if err == nil && product != nil {
+				if !product.ConversationEnabled {
+					log.Printf("[Query] conversation disabled for product %s", req.ProductID)
+					conversationEnabled = false
+				} else {
+					log.Printf("[Query] conversation enabled for product %s", req.ProductID)
+				}
+			}
+		}
+		
 		var conversationID string
 		var history []llm.HistoryMessage
 

@@ -72,17 +72,18 @@ func HandleProducts(app *App) http.HandlerFunc {
 				return
 			}
 			var req struct {
-				Name           string `json:"name"`
-				Type           string `json:"type"`
-				Description    string `json:"description"`
-				WelcomeMessage string `json:"welcome_message"`
-				AllowDownload  bool   `json:"allow_download"`
+				Name                string `json:"name"`
+				Type                string `json:"type"`
+				Description         string `json:"description"`
+				WelcomeMessage      string `json:"welcome_message"`
+				AllowDownload       bool   `json:"allow_download"`
+				ConversationEnabled bool   `json:"conversation_enabled"`
 			}
 			if err := ReadJSONBody(r, &req); err != nil {
 				WriteError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
-			p, err := app.CreateProduct(req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload)
+			p, err := app.CreateProduct(req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload, req.ConversationEnabled)
 			if err != nil {
 				WriteError(w, http.StatusBadRequest, err.Error())
 				return
@@ -120,17 +121,18 @@ func HandleProductByID(app *App) http.HandlerFunc {
 				return
 			}
 			var req struct {
-				Name           string `json:"name"`
-				Type           string `json:"type"`
-				Description    string `json:"description"`
-				WelcomeMessage string `json:"welcome_message"`
-				AllowDownload  bool   `json:"allow_download"`
+				Name                string `json:"name"`
+				Type                string `json:"type"`
+				Description         string `json:"description"`
+				WelcomeMessage      string `json:"welcome_message"`
+				AllowDownload       bool   `json:"allow_download"`
+				ConversationEnabled bool   `json:"conversation_enabled"`
 			}
 			if err := ReadJSONBody(r, &req); err != nil {
 				WriteError(w, http.StatusBadRequest, "invalid request body")
 				return
 			}
-			p, err := app.UpdateProduct(id, req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload)
+			p, err := app.UpdateProduct(id, req.Name, req.Type, req.Description, req.WelcomeMessage, req.AllowDownload, req.ConversationEnabled)
 			if err != nil {
 				WriteError(w, http.StatusBadRequest, err.Error())
 				return

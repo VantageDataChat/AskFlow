@@ -989,6 +989,14 @@
 
                                 </button>
 
+                                <button class="settings-tab-btn" data-settings-tab="settings-conversation" onclick="switchSettingsSubTab('settings-conversation')">
+
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+
+                                    <span data-i18n="admin_settings_tab_conversation">对话设置</span>
+
+                                </button>
+
                                 <button class="settings-tab-btn" data-settings-tab="settings-email" onclick="switchSettingsSubTab('settings-email')">
 
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
@@ -1397,7 +1405,27 @@
 
                                 </fieldset>
 
-                                <fieldset>
+
+
+                                <div class="admin-form-actions">
+
+                                    <button type="button" class="btn-primary" onclick="saveAdminSettings()" data-i18n="admin_settings_save">保存设置</button>
+
+                                </div>
+
+                            </div>
+
+                            </div>
+
+
+
+                            <!-- Settings Sub-Tab: Conversation -->
+
+                            <div id="settings-panel-settings-conversation" class="settings-panel hidden">
+
+                            <div class="admin-settings-form">
+
+                                <fieldset class="admin-fieldset">
 
                                     <legend data-i18n="admin_settings_conversation">对话历史设置</legend>
 
@@ -2067,6 +2095,16 @@
 
                                         </label>
 
+                                        <label class="product-checkbox-label">
+
+                                            <input type="checkbox" id="product-new-conversation-enabled">
+
+                                            <span id="product-conversation-enabled-label" data-i18n="admin_products_conversation_enabled">启用多轮对话</span>
+
+                                            <small id="product-conversation-enabled-hint" data-i18n="admin_products_conversation_enabled_hint">启用后，该产品支持上下文关联查询（如"详细看看"等）</small>
+
+                                        </label>
+
                                         <button type="button" class="btn-primary" onclick="createProduct()" data-i18n="admin_products_add_btn">添加产品</button>
 
                                     </div>
@@ -2178,6 +2216,14 @@
                                                 <input type="checkbox" id="product-edit-allow-download">
 
                                                 <span data-i18n="admin_products_allow_download">允许下载参考文件</span>
+
+                                            </label>
+
+                                            <label class="admin-checkbox-label">
+
+                                                <input type="checkbox" id="product-edit-conversation-enabled">
+
+                                                <span data-i18n="admin_products_conversation_enabled">启用多轮对话</span>
 
                                             </label>
 

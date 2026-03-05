@@ -5399,6 +5399,7 @@
         var desc = (document.getElementById('product-new-desc') || {}).value || '';
         var welcome = (document.getElementById('product-new-welcome') || {}).value || '';
         var allowDownload = document.getElementById('product-new-allow-download') ? document.getElementById('product-new-allow-download').checked : false;
+        var conversationEnabled = document.getElementById('product-new-conversation-enabled') ? document.getElementById('product-new-conversation-enabled').checked : false;
 
         if (!name.trim()) {
             showAdminToast(i18n.t('admin_products_name_required'), 'error');
@@ -5408,7 +5409,7 @@
         adminFetch('/api/products', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name.trim(), type: productType, description: desc.trim(), welcome_message: welcome.trim(), allow_download: allowDownload })
+            body: JSON.stringify({ name: name.trim(), type: productType, description: desc.trim(), welcome_message: welcome.trim(), allow_download: allowDownload, conversation_enabled: conversationEnabled })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_products_create_failed')); });
@@ -5421,6 +5422,7 @@
             if (document.getElementById('product-new-desc')) document.getElementById('product-new-desc').value = '';
             if (document.getElementById('product-new-welcome')) document.getElementById('product-new-welcome').value = '';
             if (document.getElementById('product-new-allow-download')) document.getElementById('product-new-allow-download').checked = false;
+            if (document.getElementById('product-new-conversation-enabled')) document.getElementById('product-new-conversation-enabled').checked = false;
             loadProducts();
         })
         .catch(function (err) {
@@ -5463,6 +5465,7 @@
         document.getElementById('product-edit-desc').value = p.description || '';
         document.getElementById('product-edit-welcome').value = p.welcome_message || '';
         document.getElementById('product-edit-allow-download').checked = !!p.allow_download;
+        document.getElementById('product-edit-conversation-enabled').checked = !!p.conversation_enabled;
 
         // Update modal title
         var titleEl = document.getElementById('product-edit-modal-title');
@@ -5500,6 +5503,7 @@
         var desc = document.getElementById('product-edit-desc').value.trim();
         var welcome = document.getElementById('product-edit-welcome').value.trim();
         var allowDownload = document.getElementById('product-edit-allow-download').checked;
+        var conversationEnabled = document.getElementById('product-edit-conversation-enabled').checked;
 
         if (!name) {
             showAdminToast(i18n.t('admin_products_name_required'), 'error');
@@ -5509,7 +5513,7 @@
         adminFetch('/api/products/' + encodeURIComponent(id), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, type: productType, description: desc, welcome_message: welcome, allow_download: allowDownload })
+            body: JSON.stringify({ name: name, type: productType, description: desc, welcome_message: welcome, allow_download: allowDownload, conversation_enabled: conversationEnabled })
         })
         .then(function (res) {
             if (!res.ok) return res.json().then(function (d) { throw new Error(d.error || i18n.t('admin_products_edit_failed')); });
