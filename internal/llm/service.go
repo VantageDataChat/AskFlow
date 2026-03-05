@@ -166,6 +166,28 @@ func (s *APILLMService) GenerateSimple(systemPrompt string, userText string) (st
 	return answer, nil
 }
 
+// TranslateToUserLanguage translates content to match the user's question language.
+// It analyzes the user's question to detect the language and translates the content accordingly.
+func (s *APILLMService) TranslateToUserLanguage(content string, userQuestion string) (string, error) {
+	systemPrompt := "你是一个翻译助手。分析用户问题的语言，然后将提供的内容翻译为相同的语言。" +
+		"如果用户用英文提问，翻译为英文；如果用户用中文提问，翻译为中文；其他语言同理。" +
+		"只输出翻译结果，不要添加任何解释。如果内容已经是目标语言，直接原样输出。"
+	
+	userPrompt := fmt.Sprintf("用户问题语言参考：%s\n\n需要翻译的内容：\n%s", userQuestion, content)
+	
+	messages := []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+
+	answer, err := s.callAPIWithRetry(messages)
+	if err != nil {
+		return content, nil // Return original content on error
+	}
+	return strings.TrimSpace(answer), nil
+}
+
+
 // GenerateWithHistory sends a prompt with context, conversation history, and question to the LLM.
 func (s *APILLMService) GenerateWithHistory(prompt string, context []string, history []HistoryMessage, question string) (string, error) {
 	systemContent := prompt

@@ -214,6 +214,13 @@ func (qe *QueryEngine) TranslateText(text, targetLang string) (string, error) {
 		return "", nil
 	}
 	_, ls, _ := qe.getServices()
+	
+	// Cast to *llm.APILLMService to access GenerateSimple
+	apiService, ok := ls.(*llm.APILLMService)
+	if !ok {
+		return text, nil // Return original text if service unavailable
+	}
+
 	langName := targetLang
 	switch targetLang {
 	case "zh-CN":
@@ -225,20 +232,9 @@ func (qe *QueryEngine) TranslateText(text, targetLang string) (string, error) {
 	// Use GenerateSimple to avoid adding "用户问题：" prefix to the translation input
 	systemPrompt := fmt.Sprintf("你是一个翻译助手。将以下文本翻译为%s。只输出翻译结果，不要添加任何解释或引号。如果文本已经是目标语言，直接原样输出。", langName)
 
-	// Cast to *llm.APILLMService to access GenerateSimple
-	apiService, ok := ls.(*llm.APILLMService)
-	if !ok {
-		// Fallback to old behavior if not APILLMService
-		translated, err := ls.Generate(systemPrompt, nil, text)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(translated), nil
-	}
-
 	translated, err := apiService.GenerateSimple(systemPrompt, text)
 	if err != nil {
-		return "", err
+		return text, nil // Return original text on error instead of failing
 	}
 	return strings.TrimSpace(translated), nil
 }
@@ -407,13 +403,10 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 					intro = cfg.ProductIntro
 				}
 				// Use LLM to translate the greeting to match the user's question language
-				translated, tErr := ls.Generate(
-					"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-					[]string{intro},
-					req.Question,
-				)
-				if tErr == nil && translated != "" {
-					intro = translated
+				if apiService, ok := ls.(*llm.APILLMService); ok {
+					if translated, tErr := apiService.TranslateToUserLanguage(intro, req.Question); tErr == nil && translated != "" {
+						intro = translated
+					}
 				}
 				return &QueryResponse{Answer: intro, DebugInfo: dbg}, nil
 			case "irrelevant":
@@ -425,13 +418,10 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 				if intent.Reason != "" {
 					msg = "抱歉，" + intent.Reason + "。请问有什么产品方面的问题需要帮助吗？"
 				}
-				translated, tErr := ls.Generate(
-					"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-					[]string{msg},
-					req.Question,
-				)
-				if tErr == nil && translated != "" {
-					msg = translated
+				if apiService, ok := ls.(*llm.APILLMService); ok {
+					if translated, tErr := apiService.TranslateToUserLanguage(msg, req.Question); tErr == nil && translated != "" {
+						msg = translated
+					}
 				}
 				return &QueryResponse{Answer: msg, DebugInfo: dbg}, nil
 			}
@@ -705,13 +695,10 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 				dbg.Steps = append(dbg.Steps, "Step 4: found similar pending question, returning 'already processing'")
 			}
 			pendingMsg := "该问题已在处理中，请耐心等待回复"
-			translated, tErr := ls.Generate(
-				"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-				[]string{pendingMsg},
-				req.Question,
-			)
-			if tErr == nil && translated != "" {
-				pendingMsg = translated
+			if apiService, ok := ls.(*llm.APILLMService); ok {
+				if translated, tErr := apiService.TranslateToUserLanguage(pendingMsg, req.Question); tErr == nil && translated != "" {
+					pendingMsg = translated
+				}
 			}
 			return &QueryResponse{
 				IsPending: true,
@@ -727,13 +714,10 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 			dbg.Steps = append(dbg.Steps, "Step 4: created new pending question, returning 'transferred to manual'")
 		}
 		pendingMsg := "该问题已转交人工处理，请稍后查看回复"
-		translated, tErr := ls.Generate(
-			"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-			[]string{pendingMsg},
-			req.Question,
-		)
-		if tErr == nil && translated != "" {
-			pendingMsg = translated
+		if apiService, ok := ls.(*llm.APILLMService); ok {
+			if translated, tErr := apiService.TranslateToUserLanguage(pendingMsg, req.Question); tErr == nil && translated != "" {
+				pendingMsg = translated
+			}
 		}
 		return &QueryResponse{
 			IsPending: true,
@@ -810,13 +794,10 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 		}
 		// When unable to answer, don't return sources/images — they are irrelevant noise
 		pendingMsg := "该问题已转交人工处理，请稍后查看回复"
-		translated, tErr := ls.Generate(
-			"你是一个翻译助手。将以下内容翻译为与用户提问相同的语言。如果用户用英文提问，翻译为英文；如果用户用中文提问，保持中文。只输出翻译结果，不要添加任何解释。",
-			[]string{pendingMsg},
-			req.Question,
-		)
-		if tErr == nil && translated != "" {
-			pendingMsg = translated
+		if apiService, ok := ls.(*llm.APILLMService); ok {
+			if translated, tErr := apiService.TranslateToUserLanguage(pendingMsg, req.Question); tErr == nil && translated != "" {
+				pendingMsg = translated
+			}
 		}
 		return &QueryResponse{
 			Answer:    pendingMsg,
