@@ -1,179 +1,139 @@
-# 中文PDF解析乱码修复
+# 中文PDF解析乱码修复 v1.1
 
 ## 问题描述
 
-在解析中文PDF文件时，提取的文本出现乱码，显示为 `�Í�Ý�Ð�Ý�Ý�Ý` 等无法识别的字符。这是由于GoPDF2库在处理某些中文PDF时存在字符编码问题。
+在解析中文PDF文件时，提取的文本出现乱码，显示为 `�Í�Ý�Ð�Ý�Ý�Ý` 或 `锟斤拷` 等无法识别的字符。
 
-## 根本原因
+## 测试案例：test.pdf
 
-GoPDF2库的 `ExtractPageText()` 函数在处理某些中文PDF时无法正确解码字符编码，导致返回乱码文本。这是PDF解析库的常见问题，特别是对于CJK（中文、日文、韩文）字符。
+**文件信息：**
+- 文件大小：620,075 字节  
+- 页数：19页
+- 提取文本长度：74,561字符
+
+**乱码统计：**
+- 总字符数：46,368
+- 乱码字符：11,005 (23.73%)
+- 替换字符（�）：11,005 (23.73%)
+
+**检测结果：**
+```
+[PDF] Detected garbled text on page 1-10, 17-19, may need OCR
+[PDF] Garbled text detected (ratio: 22.81%, length: 76441), will attempt OCR fallback
+```
+
+✅ 系统正确检测到乱码并触发OCR回退！
 
 ## 解决方案
 
-实现了智能乱码检测和OCR回退机制：
+### 版本历史
 
-### 1. 乱码检测
+**v1.0 (2026-03-05 14:08)** - 初始实现
+- 仅检查文本长度 < 100字符
+- 问题：对于长文本的乱码PDF（如test.pdf）无法触发OCR
 
-添加了 `containsGarbledText()` 函数来检测文本是否包含乱码字符：
+**v1.1 (2026-03-05 18:24)** - 改进版本  
+- 增加乱码比例检测（>15%）
+- 解决了长文本乱码PDF的问题
+- 更智能的双重触发机制
 
-- 检测Unicode替换字符 (�, U+FFFD)，这是编码失败的标准指示符
-- 检测异常控制字符 (0x0080-0x009F)
-- 如果超过5%的字符是乱码，则判定为乱码文本
-- 特别检测 "�" 字符的高频出现
+### OCR触发条件（满足任一即可）
 
-### 2. OCR回退机制
+1. **短文本检测**：提取的文本内容很少（<100字符）
+2. **高乱码比例**：乱码字符超过15%
 
-当检测到乱码文本且提取的文本内容很少（<100字符）时：
+### 工作流程
 
-1. 清空乱码文本
-2. 触发现有的OCR回退逻辑
-3. 使用LLM视觉API对PDF页面图片进行OCR识别
-4. 提取准确的中文文本
+1. 逐页提取PDF文本
+2. 检测每页是否包含乱码（>5%阈值）
+3. 计算整体乱码比例
+4. 如果满足触发条件，清空乱码文本并启动OCR
+5. 使用LLM视觉API对PDF页面进行OCR识别
+6. 返回准确的中文文本
 
-## 代码修改
+## 代码实现
 
-### 文件：`internal/parser/parser.go`
-
-#### 修改1：在PDF文本提取中添加乱码检测
+### 改进的OCR触发逻辑
 
 ```go
-// Extract text page by page
-var sb strings.Builder
-hasGarbledText := false
-for i := 0; i < pageCount; i++ {
-    text, err := gopdf.ExtractPageText(data, i)
-    if err != nil {
-        continue
-    }
-    if text != "" {
-        // Detect garbled Chinese text (common encoding issue indicators)
-        if containsGarbledText(text) {
-            hasGarbledText = true
-            log.Printf("[PDF] Detected garbled text on page %d, may need OCR", i+1)
-        }
-        if sb.Len() > 0 {
-            sb.WriteString("\n\n")
-        }
-        sb.WriteString(text)
-    }
-}
-
-// If garbled text detected and we have very little valid text, treat as scanned PDF
+// If garbled text detected, calculate ratio and decide whether to use OCR
 extractedText := sb.String()
-if hasGarbledText && len(strings.TrimSpace(extractedText)) < 100 {
-    log.Printf("[PDF] Garbled text detected with minimal content, will attempt OCR fallback")
-    extractedText = "" // Clear garbled text to trigger OCR fallback
-}
-```
-
-#### 修改2：添加乱码检测函数
-
-```go
-// containsGarbledText detects if text contains garbled characters that indicate
-// encoding issues, particularly common with Chinese PDFs.
-// Returns true if the text appears to be garbled and may need OCR.
-func containsGarbledText(text string) bool {
-    if len(text) == 0 {
-        return false
-    }
-    
+if hasGarbledText {
+    // Calculate garbled character ratio
     garbledCount := 0
     totalChars := 0
-    
-    for _, r := range text {
+    for _, r := range extractedText {
         totalChars++
-        // Check for replacement character (�) which indicates encoding failure
         if r == '\uFFFD' {
             garbledCount++
         }
-        // Check for unusual control characters that shouldn't appear in normal text
         if r >= 0x0080 && r <= 0x009F && r != '\n' && r != '\r' && r != '\t' {
             garbledCount++
         }
     }
     
-    // If more than 5% of characters are garbled, consider it garbled text
-    if totalChars > 0 && float64(garbledCount)/float64(totalChars) > 0.05 {
-        return true
+    // Trigger OCR if:
+    // 1. Very little text extracted (< 100 chars), OR
+    // 2. High garbled ratio (> 15% of characters are garbled)
+    garbledRatio := 0.0
+    if totalChars > 0 {
+        garbledRatio = float64(garbledCount) / float64(totalChars)
     }
     
-    // Also check for patterns like "�Í�Ý" which are common in garbled Chinese text
-    if strings.Contains(text, "�") && strings.Count(text, "�") > len(text)/20 {
-        return true
+    if len(strings.TrimSpace(extractedText)) < 100 || garbledRatio > 0.15 {
+        log.Printf("[PDF] Garbled text detected (ratio: %.2f%%, length: %d), will attempt OCR fallback", 
+            garbledRatio*100, len(strings.TrimSpace(extractedText)))
+        extractedText = "" // Clear garbled text to trigger OCR fallback
     }
-    
-    return false
 }
 ```
 
-#### 修改3：更新返回语句使用提取的文本变量
+## 阈值说明
 
-```go
-return &ParseResult{
-    Text: CleanText(extractedText),  // 使用 extractedText 而不是 sb.String()
-    Metadata: map[string]string{
-        "type":        "pdf",
-        "page_count":  fmt.Sprintf("%d", pageCount),
-        "image_count": fmt.Sprintf("%d", len(images)),
-    },
-    Images: images,
-}, nil
+| 阈值类型 | 值 | 用途 |
+|---------|-----|------|
+| 乱码检测阈值 | 5% | 判断单页是否包含乱码 |
+| OCR触发阈值 | 15% | 判断是否需要OCR整个文档 |
+| 短文本阈值 | 100字符 | 判断是否为扫描PDF |
+
+## 测试验证
+
+使用 `test_pdf_parser.go` 测试工具：
+
+```bash
+go run test_pdf_parser.go
 ```
 
-## 工作原理
+输出示例：
+```
+PDF file size: 620075 bytes
+[PDF] Detected garbled text on page 1, may need OCR
+...
+[PDF] Garbled text detected (ratio: 22.81%, length: 76441), will attempt OCR fallback
 
-1. **正常PDF**：如果PDF文本提取成功且没有乱码，直接使用提取的文本
-2. **乱码PDF**：
-   - 检测到乱码字符
-   - 如果提取的文本很少（<100字符），清空文本
-   - 触发现有的OCR逻辑（在 `internal/document/manager.go` 中）
-   - 使用LLM视觉API对每页进行OCR识别
-   - 返回准确的中文文本
+Garbled character analysis:
+Total characters: 46368
+Garbled characters: 11005 (23.73%)
+⚠️  WARNING: Garbled text detected (23.73% > 5% threshold)
+This PDF should trigger OCR fallback in the system.
+```
 
 ## 优势
 
-1. **自动检测**：无需手动判断PDF是否有编码问题
-2. **智能回退**：只在必要时使用OCR，节省API调用
-3. **保持兼容**：不影响正常PDF的处理流程
-4. **利用现有功能**：复用已有的OCR基础设施
-
-## 测试
-
-编译后的可执行文件：`askflow_chinese_fix.exe`
-
-测试步骤：
-1. 上传有乱码问题的中文PDF
-2. 系统自动检测乱码
-3. 触发OCR处理
-4. 返回正确的中文文本
-
-## 注意事项
-
-1. OCR处理需要配置LLM服务（用于视觉API）
-2. OCR处理比直接文本提取慢，但能保证准确性
-3. 对于大型PDF文件，OCR处理可能需要较长时间
-4. 系统会自动并发处理多页（最多3个并发LLM调用）
-
-## 未来改进建议
-
-1. **替换PDF库**：考虑使用对中文支持更好的PDF解析库
-   - `unidoc/unipdf`（商业库，Unicode支持好）
-   - `pdfcpu`（纯Go实现）
-   - 调用外部工具如 `pdftotext` 并指定编码
-
-2. **编码转换**：尝试检测和转换不同的中文编码（GB2312, GBK, UTF-8等）
-
-3. **混合策略**：对于部分页面乱码的PDF，只对乱码页面使用OCR
+1. **双重保护**：短文本和高乱码比例都能触发OCR
+2. **智能判断**：根据实际乱码情况决定是否使用OCR
+3. **自动检测**：无需手动判断PDF编码问题
+4. **保持兼容**：不影响正常PDF的处理流程
 
 ## 相关文件
 
-- `internal/parser/parser.go` - PDF解析逻辑
-- `internal/document/manager.go` - OCR回退逻辑
-- `go.mod` - 依赖包版本
+- `internal/parser/parser.go` - PDF解析和乱码检测逻辑
+- `internal/document/manager.go` - OCR回退处理
+- `test_pdf_parser.go` - 测试工具
+- `test.pdf` - 测试用例
 
 ## 编译信息
 
-- 修复时间：2026-03-05
-- 编译输出：`askflow_chinese_fix.exe`
 - Go版本：1.26.0
 - GoPDF2版本：v0.0.0-20260212143022-4f8ad48dca6e
+- 最后更新：2026-03-05 18:24

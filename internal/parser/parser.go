@@ -121,9 +121,33 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 	
 	// If garbled text detected and we have very little valid text, treat as scanned PDF
 	extractedText := sb.String()
-	if hasGarbledText && len(strings.TrimSpace(extractedText)) < 100 {
-		log.Printf("[PDF] Garbled text detected with minimal content, will attempt OCR fallback")
-		extractedText = "" // Clear garbled text to trigger OCR fallback
+	if hasGarbledText {
+		// Calculate garbled character ratio
+		garbledCount := 0
+		totalChars := 0
+		for _, r := range extractedText {
+			totalChars++
+			if r == '\uFFFD' {
+				garbledCount++
+			}
+			if r >= 0x0080 && r <= 0x009F && r != '\n' && r != '\r' && r != '\t' {
+				garbledCount++
+			}
+		}
+		
+		// Trigger OCR if:
+		// 1. Very little text extracted (< 100 chars), OR
+		// 2. High garbled ratio (> 15% of characters are garbled)
+		garbledRatio := 0.0
+		if totalChars > 0 {
+			garbledRatio = float64(garbledCount) / float64(totalChars)
+		}
+		
+		if len(strings.TrimSpace(extractedText)) < 100 || garbledRatio > 0.15 {
+			log.Printf("[PDF] Garbled text detected (ratio: %.2f%%, length: %d), will attempt OCR fallback", 
+				garbledRatio*100, len(strings.TrimSpace(extractedText)))
+			extractedText = "" // Clear garbled text to trigger OCR fallback
+		}
 	}
 
 	// Extract images (best-effort, non-fatal)
