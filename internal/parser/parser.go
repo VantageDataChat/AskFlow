@@ -100,17 +100,30 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 
 	// Extract text page by page
 	var sb strings.Builder
+	hasGarbledText := false
 	for i := 0; i < pageCount; i++ {
 		text, err := gopdf.ExtractPageText(data, i)
 		if err != nil {
 			continue
 		}
 		if text != "" {
+			// Detect garbled Chinese text (common encoding issue indicators)
+			if containsGarbledText(text) {
+				hasGarbledText = true
+				log.Printf("[PDF] Detected garbled text on page %d, may need OCR", i+1)
+			}
 			if sb.Len() > 0 {
 				sb.WriteString("\n\n")
 			}
 			sb.WriteString(text)
 		}
+	}
+	
+	// If garbled text detected and we have very little valid text, treat as scanned PDF
+	extractedText := sb.String()
+	if hasGarbledText && len(strings.TrimSpace(extractedText)) < 100 {
+		log.Printf("[PDF] Garbled text detected with minimal content, will attempt OCR fallback")
+		extractedText = "" // Clear garbled text to trigger OCR fallback
 	}
 
 	// Extract images (best-effort, non-fatal)
@@ -210,7 +223,7 @@ func (dp *DocumentParser) parsePDF(data []byte) (result *ParseResult, err error)
 	}()
 
 	return &ParseResult{
-		Text: CleanText(sb.String()),
+		Text: CleanText(extractedText),
 		Metadata: map[string]string{
 			"type":        "pdf",
 			"page_count":  fmt.Sprintf("%d", pageCount),
@@ -725,6 +738,51 @@ func init() {
 		blockOpenRe[tag] = regexp.MustCompile(`(?i)<` + tag + `[^>]*>`)
 		blockCloseRe[tag] = regexp.MustCompile(`(?i)</` + tag + `\s*>`)
 	}
+}
+
+// containsGarbledText detects if text contains garbled characters that indicate
+// encoding issues, particularly common with Chinese PDFs.
+// Returns true if the text appears to be garbled and may need OCR.
+//
+// Detection criteria:
+// 1. Unicode replacement character (U+FFFD) indicating encoding failure
+// 2. Unusual control characters (0x0080-0x009F) that shouldn't appear in normal text
+// 3. High frequency of replacement characters (>5% of total or >5% as "�" symbol)
+func containsGarbledText(text string) bool {
+	if len(text) == 0 {
+		return false
+	}
+	
+	garbledCount := 0
+	replacementCharCount := 0
+	totalChars := 0
+	
+	for _, r := range text {
+		totalChars++
+		// Check for replacement character (�) which indicates encoding failure
+		if r == '\uFFFD' {
+			garbledCount++
+			replacementCharCount++
+			continue
+		}
+		// Check for unusual control characters that shouldn't appear in normal text
+		if r >= 0x0080 && r <= 0x009F && r != '\n' && r != '\r' && r != '\t' {
+			garbledCount++
+		}
+	}
+	
+	// If more than 5% of characters are garbled, consider it garbled text
+	if totalChars > 0 && float64(garbledCount)/float64(totalChars) > 0.05 {
+		return true
+	}
+	
+	// Also check for high frequency of replacement characters
+	// This catches cases where the text is mostly garbled
+	if totalChars > 0 && float64(replacementCharCount)/float64(totalChars) > 0.05 {
+		return true
+	}
+	
+	return false
 }
 
 // isImageJPEGOrPNG checks if the data starts with JPEG or PNG magic bytes.
