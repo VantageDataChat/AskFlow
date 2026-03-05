@@ -33,7 +33,7 @@ type EmbedFunc func(text string) ([]float64, error)
 type SimilarityFunc func(a, b []float64) float64
 
 // SimilarityThreshold is the minimum cosine similarity to consider two questions as duplicates.
-const SimilarityThreshold = 0.90
+const SimilarityThreshold = 0.85
 
 // Service handles FAQ CRUD and weight tracking.
 type Service struct {
