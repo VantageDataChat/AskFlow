@@ -5309,6 +5309,12 @@
         var dlHint = document.getElementById('product-allow-download-hint');
         if (dlLabel) dlLabel.textContent = i18n.t('admin_products_allow_download');
         if (dlHint) dlHint.textContent = i18n.t('admin_products_allow_download_hint');
+        
+        var convLabel = document.getElementById('product-conversation-enabled-label');
+        var convHint = document.getElementById('product-conversation-enabled-hint');
+        if (convLabel) convLabel.textContent = i18n.t('admin_products_conversation_enabled');
+        if (convHint) convHint.textContent = i18n.t('admin_products_conversation_enabled_hint');
+        
         // Translate all data-i18n elements within the products tab
         var tab = document.getElementById('admin-tab-products');
         if (tab) {
@@ -5348,7 +5354,7 @@
         window._cachedProducts = products;
 
         if (!products || products.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="admin-table-empty">' + i18n.t('admin_products_empty') + '</td></tr>';
             return;
         }
 
@@ -5358,6 +5364,7 @@
             var createdAt = p.created_at ? new Date(p.created_at).toLocaleString() : '-';
             var typeLabel = p.type === 'knowledge_base' ? i18n.t('admin_products_type_knowledge') : i18n.t('admin_products_type_service');
             var dlLabel = p.allow_download ? '✅' : '❌';
+            var convLabel = p.conversation_enabled ? '✅' : '❌';
             var checked = (p.id === defaultProductID) ? ' checked' : '';
             html += '<tr>' +
                 '<td style="text-align:center"><input type="radio" name="default-product" value="' + escapeHtml(p.id) + '"' + checked + ' onchange="setDefaultProduct(\'' + escapeHtml(p.id) + '\')" /></td>' +
@@ -5366,6 +5373,7 @@
                 '<td>' + escapeHtml(typeLabel) + '</td>' +
                 '<td>' + escapeHtml(p.description || '-') + '</td>' +
                 '<td>' + dlLabel + '</td>' +
+                '<td>' + convLabel + '</td>' +
                 '<td>' + escapeHtml(createdAt) + '</td>' +
                 '<td>' +
                     '<button class="btn-primary btn-sm" style="margin-right:6px" onclick="editProduct(\'' + escapeHtml(p.id) + '\')">' + i18n.t('admin_products_edit_btn') + '</button>' +

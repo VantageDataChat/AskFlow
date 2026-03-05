@@ -74,13 +74,21 @@ func HandleQuery(app *App) http.HandlerFunc {
 		if conversationEnabled && req.ProductID != "" {
 			// Check product-level conversation setting
 			product, err := app.productService.GetByID(req.ProductID)
-			if err == nil && product != nil {
+			if err != nil {
+				// Log error but don't fail the request - default to disabled for safety
+				log.Printf("[Query] WARNING: failed to get product %s for conversation check: %v (defaulting to disabled)", req.ProductID, err)
+				conversationEnabled = false
+			} else if product != nil {
 				if !product.ConversationEnabled {
-					log.Printf("[Query] conversation disabled for product %s", req.ProductID)
+					log.Printf("[Query] conversation disabled for product %s (product setting)", req.ProductID)
 					conversationEnabled = false
 				} else {
 					log.Printf("[Query] conversation enabled for product %s", req.ProductID)
 				}
+			} else {
+				// Product not found - should not happen but handle gracefully
+				log.Printf("[Query] WARNING: product %s not found for conversation check (defaulting to disabled)", req.ProductID)
+				conversationEnabled = false
 			}
 		}
 		

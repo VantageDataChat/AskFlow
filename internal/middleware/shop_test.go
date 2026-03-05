@@ -54,14 +54,15 @@ func setupShopMiddlewareTestDB(t *testing.T) *sql.DB {
 			created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS products (
-			id              TEXT PRIMARY KEY,
-			name            TEXT NOT NULL UNIQUE,
-			type            TEXT DEFAULT 'service',
-			description     TEXT DEFAULT '',
-			welcome_message TEXT DEFAULT '',
-			allow_download  INTEGER DEFAULT 0,
-			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+			id                  TEXT PRIMARY KEY,
+			name                TEXT NOT NULL UNIQUE,
+			type                TEXT DEFAULT 'service',
+			description         TEXT DEFAULT '',
+			welcome_message     TEXT DEFAULT '',
+			allow_download      INTEGER DEFAULT 0,
+			conversation_enabled INTEGER DEFAULT 0,
+			created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE TABLE IF NOT EXISTS shops (
 			id                     TEXT PRIMARY KEY,
