@@ -90,6 +90,7 @@ func NewOAuthClient(providers map[string]config.OAuthProviderConfig) *OAuthClien
 			case <-ticker.C:
 				oc.cleanExpiredStates()
 			case <-oc.stopCh:
+				log.Printf("[OAuth] state cleanup goroutine stopped")
 				return
 			}
 		}
@@ -173,7 +174,10 @@ func (oc *OAuthClient) HandleCallback(provider string, code string) (*OAuthUser,
 		return nil, fmt.Errorf("unsupported OAuth provider: %s", provider)
 	}
 
-	ctx := context.Background()
+	// Use context with timeout to prevent hanging on slow OAuth providers
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
 	token, err := cfg.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("OAuth token exchange failed for %s: %w", provider, err)

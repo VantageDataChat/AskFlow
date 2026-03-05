@@ -41,6 +41,7 @@ func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
 			case <-ticker.C:
 				rl.cleanup()
 			case <-rl.stopCh:
+				log.Printf("[RateLimiter] cleanup goroutine stopped")
 				return
 			}
 		}

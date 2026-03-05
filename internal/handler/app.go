@@ -889,7 +889,7 @@ type captchaEntry struct {
 
 var (
 	captchaStore = make(map[string]captchaEntry)
-	captchaMu    sync.Mutex
+	captchaMu    sync.RWMutex // Use RWMutex for better read concurrency
 )
 
 // CaptchaResponse holds the captcha ID and question text.
@@ -963,6 +963,8 @@ func ValidateCaptcha(id string, answer int) bool {
 		return false
 	}
 	delete(captchaStore, id) // one-time use
+	
+	// Check expiry after deletion to prevent timing attacks
 	if time.Now().After(entry.expiresAt) {
 		return false
 	}

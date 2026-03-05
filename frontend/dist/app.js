@@ -3753,6 +3753,13 @@
                 var dbgSelect = document.getElementById('cfg-vec-debug-mode');
                 if (dbgSelect) dbgSelect.value = vec.debug_mode ? 'true' : 'false';
 
+                // Load conversation settings
+                var conv = cfg.conversation || {};
+                var convEnabledSelect = document.getElementById('cfg-conversation-enabled');
+                if (convEnabledSelect) convEnabledSelect.value = conv.enabled ? 'true' : 'false';
+                setVal('cfg-conversation-max-history', conv.max_history_messages || 10);
+                setVal('cfg-conversation-max-age', conv.max_history_age || 30);
+
                 setVal('cfg-admin-login-route', admin.login_route || '/admin');
 
                 var anonSelect = document.getElementById('cfg-anon-backend');
@@ -3992,6 +3999,14 @@
         updates['vector.text_match_enabled'] = vecTextMatch === 'true';
         var vecDebugMode = getVal('cfg-vec-debug-mode');
         updates['vector.debug_mode'] = vecDebugMode === 'true';
+
+        // Conversation settings
+        var convEnabled = getVal('cfg-conversation-enabled');
+        updates['conversation.enabled'] = convEnabled === 'true';
+        var convMaxHistory = getVal('cfg-conversation-max-history');
+        if (convMaxHistory !== '') updates['conversation.max_history_messages'] = parseInt(convMaxHistory, 10);
+        var convMaxAge = getVal('cfg-conversation-max-age');
+        if (convMaxAge !== '') updates['conversation.max_history_age'] = parseInt(convMaxAge, 10);
 
         var adminLoginRouteVal = getVal('cfg-admin-login-route');
         if (adminLoginRouteVal) {

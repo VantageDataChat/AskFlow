@@ -30,13 +30,11 @@ func NewLoginLimiterRW(readDB, writeDB *sql.DB) *LoginLimiter {
 }
 
 // CheckAllowed returns nil if the login attempt is allowed, or an error describing the lockout.
+// Optimized to use a single query with UNION ALL to reduce database round-trips.
 func (ll *LoginLimiter) CheckAllowed(username, ip string) error {
-	// No mutex needed: all operations are read-only DB queries,
-	// and SQLite WAL mode + database/sql handle concurrency safely.
-
 	now := time.Now().UTC()
 
-	// Check manual bans first
+	// Check manual bans first (separate query for clarity)
 	var manualBanReason string
 	err := ll.readDB.QueryRow(
 		`SELECT reason FROM login_bans WHERE (username = ? OR ip = ?) AND unlocks_at > ? LIMIT 1`,
@@ -46,18 +44,29 @@ func (ll *LoginLimiter) CheckAllowed(username, ip string) error {
 		return fmt.Errorf("%s", manualBanReason)
 	}
 
-	// Rule 3: IP locked for 10 days after 100 consecutive failures
-	var ipConsec int
-	err = ll.readDB.QueryRow(
-		`SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND success = 0 AND created_at > (
-			SELECT COALESCE(MAX(created_at), '1970-01-01') FROM login_attempts WHERE ip = ? AND success = 1
-		)`, ip, ip,
-	).Scan(&ipConsec)
+	// Combined query for all three rules to reduce round-trips
+	// Returns: ipConsec, dailyFails, consecFails
+	var ipConsec, dailyFails, consecFails int
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	tomorrowStart := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	
+	err = ll.readDB.QueryRow(`
+		SELECT 
+			(SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND success = 0 AND created_at > (
+				SELECT COALESCE(MAX(created_at), '1970-01-01') FROM login_attempts WHERE ip = ? AND success = 1
+			)) as ip_consec,
+			(SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = 0 AND created_at >= ? AND created_at < ?) as daily_fails,
+			(SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = 0 AND created_at > (
+				SELECT COALESCE(MAX(created_at), '1970-01-01') FROM login_attempts WHERE username = ? AND success = 1
+			)) as consec_fails
+	`, ip, ip, username, todayStart, tomorrowStart, username, username).Scan(&ipConsec, &dailyFails, &consecFails)
+	
 	if err != nil {
 		return fmt.Errorf("查询登录记录失败: %w", err)
 	}
+
+	// Rule 3: IP locked for 10 days after 100 consecutive failures
 	if ipConsec >= 100 {
-		// Check if the 100th failure was within the last 10 days
 		var lastFailStr sql.NullString
 		ll.readDB.QueryRow(
 			`SELECT created_at FROM login_attempts WHERE ip = ? AND success = 0 ORDER BY created_at DESC LIMIT 1 OFFSET 99`, ip,
@@ -77,32 +86,12 @@ func (ll *LoginLimiter) CheckAllowed(username, ip string) error {
 	}
 
 	// Rule 2: 50 failures today → locked for the rest of the day
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	tomorrowStart := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
-	var dailyFails int
-	err = ll.readDB.QueryRow(
-		`SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = 0 AND created_at >= ? AND created_at < ?`,
-		username, todayStart, tomorrowStart,
-	).Scan(&dailyFails)
-	if err != nil {
-		return fmt.Errorf("查询登录记录失败: %w", err)
-	}
 	if dailyFails >= 50 {
 		return fmt.Errorf("今日密码错误次数过多，当天禁止登录")
 	}
 
 	// Rule 1: 10 consecutive failures → lock for 1 hour
-	var consecFails int
-	err = ll.readDB.QueryRow(
-		`SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = 0 AND created_at > (
-			SELECT COALESCE(MAX(created_at), '1970-01-01') FROM login_attempts WHERE username = ? AND success = 1
-		)`, username, username,
-	).Scan(&consecFails)
-	if err != nil {
-		return fmt.Errorf("查询登录记录失败: %w", err)
-	}
 	if consecFails >= 10 {
-		// Check if the 10th consecutive failure was within the last hour
 		var tenthFailStr sql.NullString
 		ll.readDB.QueryRow(
 			`SELECT created_at FROM login_attempts WHERE username = ? AND success = 0 AND created_at > (

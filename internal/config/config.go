@@ -810,6 +810,38 @@ func (cm *ConfigManager) applyUpdate(key string, val interface{}) error {
 		}
 		cm.config.Server.SSLKey = s
 
+	// Conversation fields
+	case "conversation.enabled":
+		b, ok := val.(bool)
+		if !ok {
+			return errors.New("expected boolean")
+		}
+		cm.config.Conversation.Enabled = b
+	case "conversation.max_history_messages":
+		n, err := toInt(val)
+		if err != nil {
+			return err
+		}
+		if n < 1 || n > 100 {
+			return errors.New("max_history_messages must be between 1 and 100")
+		}
+		cm.config.Conversation.MaxHistoryMessages = n
+	case "conversation.max_history_age":
+		n, err := toInt(val)
+		if err != nil {
+			return err
+		}
+		if n < 1 || n > 365 {
+			return errors.New("max_history_age must be between 1 and 365 days")
+		}
+		cm.config.Conversation.MaxHistoryAge = n
+	case "conversation.compression_enabled":
+		b, ok := val.(bool)
+		if !ok {
+			return errors.New("expected boolean")
+		}
+		cm.config.Conversation.CompressionEnabled = b
+
 	default:
 		// Handle OAuth provider config: oauth.providers.<name>.<field>
 		if strings.HasPrefix(key, "oauth.providers.") {

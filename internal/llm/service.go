@@ -151,6 +151,21 @@ func (s *APILLMService) Generate(prompt string, context []string, question strin
 	return answer, nil
 }
 
+// GenerateSimple sends a simple prompt and text to the LLM without adding "用户问题：" prefix.
+// This is useful for translation and other tasks where the input should not be prefixed.
+func (s *APILLMService) GenerateSimple(systemPrompt string, userText string) (string, error) {
+	messages := []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userText},
+	}
+
+	answer, err := s.callAPIWithRetry(messages)
+	if err != nil {
+		return "", fmt.Errorf("LLM API failed after retries: %w", err)
+	}
+	return answer, nil
+}
+
 // GenerateWithHistory sends a prompt with context, conversation history, and question to the LLM.
 func (s *APILLMService) GenerateWithHistory(prompt string, context []string, history []HistoryMessage, question string) (string, error) {
 	systemContent := prompt

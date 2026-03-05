@@ -221,13 +221,28 @@ func (qe *QueryEngine) TranslateText(text, targetLang string) (string, error) {
 	case "en-US", "en":
 		langName = "English"
 	}
-	prompt := fmt.Sprintf("你是一个翻译助手。将以下文本翻译为%s。只输出翻译结果，不要添加任何解释或引号。如果文本已经是目标语言，直接原样输出。", langName)
-	translated, err := ls.Generate(prompt, nil, text)
+
+	// Use GenerateSimple to avoid adding "用户问题：" prefix to the translation input
+	systemPrompt := fmt.Sprintf("你是一个翻译助手。将以下文本翻译为%s。只输出翻译结果，不要添加任何解释或引号。如果文本已经是目标语言，直接原样输出。", langName)
+
+	// Cast to *llm.APILLMService to access GenerateSimple
+	apiService, ok := ls.(*llm.APILLMService)
+	if !ok {
+		// Fallback to old behavior if not APILLMService
+		translated, err := ls.Generate(systemPrompt, nil, text)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(translated), nil
+	}
+
+	translated, err := apiService.GenerateSimple(systemPrompt, text)
 	if err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(translated), nil
 }
+
 
 // IntentResult represents the result of intent classification.
 type IntentResult struct {

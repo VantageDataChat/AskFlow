@@ -42,6 +42,8 @@ type SessionManager struct {
 	cacheMu sync.RWMutex
 	cache   map[string]sessionCacheEntry
 	// cacheTTL controls how long a cached session is considered fresh.
+	// Set to 30 seconds to ensure cache entries are refreshed frequently
+	// and expiry checks are accurate.
 	cacheTTL time.Duration
 }
 
@@ -56,7 +58,7 @@ func NewSessionManager(readDB, writeDB *sql.DB, expiry time.Duration) *SessionMa
 		writeDB:  writeDB,
 		expiry:   expiry,
 		cache:    make(map[string]sessionCacheEntry, sessionCacheSize),
-		cacheTTL: 2 * time.Minute,
+		cacheTTL: 30 * time.Second, // Reduced from 2 minutes to 30 seconds for better expiry accuracy
 	}
 }
 
