@@ -3478,6 +3478,7 @@
                 html += '<button class="btn-secondary btn-sm admin-edit-answer-btn" data-id="' + escapeHtml(q.id) + '" data-question="' + escapeHtml(q.question || '') + '" data-answer="' + escapeHtml(q.answer || '') + '" data-image="' + escapeHtml(q.image_data || '') + '">' + i18n.t('admin_pending_edit_btn') + '</button>';
             }
 
+            html += ' <button class="btn-secondary btn-sm admin-link-faq-btn" data-id="' + escapeHtml(q.id) + '" data-question="' + escapeHtml(q.question || '') + '">' + i18n.t('admin_pending_link_faq_btn') + '</button>';
             html += ' <button class="btn-danger btn-sm admin-delete-pending-btn" data-id="' + escapeHtml(q.id) + '">' + i18n.t('admin_pending_delete_btn') + '</button>';
 
             html += '</div>';
@@ -3527,6 +3528,16 @@
                     );
                 });
             })(editBtns[m]);
+        }
+
+        // Bind link FAQ button clicks
+        var linkFaqBtns = container.querySelectorAll('.admin-link-faq-btn');
+        for (var n = 0; n < linkFaqBtns.length; n++) {
+            (function(btn) {
+                btn.addEventListener('click', function() {
+                    showLinkFAQDialog(btn.getAttribute('data-id'), btn.getAttribute('data-question'));
+                });
+            })(linkFaqBtns[n]);
         }
     }
 
@@ -3729,6 +3740,164 @@
         })
         .catch(function (err) {
             showAdminToast(err.message || i18n.t('admin_answer_failed'), 'error');
+        })
+        .finally(function () {
+            resetBtnLoading(submitBtn);
+        });
+    };
+
+    // --- Link FAQ Dialog ---
+
+    window.showLinkFAQDialog = function (questionId, questionText) {
+        var dialog = document.getElementById('admin-link-faq-dialog');
+        if (!dialog) {
+            // Create dialog if it doesn't exist
+            dialog = document.createElement('div');
+            dialog.id = 'admin-link-faq-dialog';
+            dialog.className = 'admin-dialog hidden';
+            dialog.innerHTML = '<div class="admin-dialog-content">' +
+                '<div class="admin-dialog-header">' +
+                '<h3 data-i18n="admin_pending_link_faq_title">关联FAQ</h3>' +
+                '<button class="admin-dialog-close" onclick="closeLinkFAQDialog()">&times;</button>' +
+                '</div>' +
+                '<div class="admin-dialog-body">' +
+                '<div style="margin-bottom:12px;padding:12px;background:#f5f5f5;border-radius:6px;">' +
+                '<strong data-i18n="admin_pending_question_label">问题:</strong> <span id="link-faq-question-text"></span>' +
+                '</div>' +
+                '<div style="margin-bottom:12px;">' +
+                '<input type="text" id="link-faq-search" placeholder="' + i18n.t('admin_pending_search_faq_placeholder') + '" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" />' +
+                '</div>' +
+                '<div id="link-faq-list" style="max-height:300px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;"></div>' +
+                '</div>' +
+                '<div class="admin-dialog-footer">' +
+                '<button class="btn-secondary" onclick="closeLinkFAQDialog()" data-i18n="admin_dialog_cancel">取消</button>' +
+                '<button id="link-faq-submit-btn" class="btn-primary" onclick="submitLinkFAQ()" data-i18n="admin_pending_link_faq_submit">确认关联</button>' +
+                '</div>' +
+                '</div>';
+            document.body.appendChild(dialog);
+        }
+
+        // Store question ID
+        dialog.setAttribute('data-question-id', questionId);
+
+        // Set question text
+        var questionTextEl = document.getElementById('link-faq-question-text');
+        if (questionTextEl) questionTextEl.textContent = questionText;
+
+        // Clear search and selection
+        var searchInput = document.getElementById('link-faq-search');
+        if (searchInput) {
+            searchInput.value = '';
+            searchInput.oninput = function() {
+                loadFAQsForLinking(searchInput.value);
+            };
+        }
+
+        // Load FAQs
+        loadFAQsForLinking('');
+
+        // Show dialog
+        dialog.classList.remove('hidden');
+    };
+
+    window.closeLinkFAQDialog = function () {
+        var dialog = document.getElementById('admin-link-faq-dialog');
+        if (dialog) dialog.classList.add('hidden');
+    };
+
+    var selectedFAQId = null;
+
+    function loadFAQsForLinking(searchTerm) {
+        var listEl = document.getElementById('link-faq-list');
+        if (!listEl) return;
+
+        listEl.innerHTML = '<div style="padding:12px;text-align:center;color:#999;">' + i18n.t('admin_loading') + '</div>';
+
+        adminFetch('/api/faq')
+            .then(function(res) {
+                if (!res.ok) throw new Error('Failed to load FAQs');
+                return res.json();
+            })
+            .then(function(data) {
+                var faqs = data.faqs || [];
+
+                // Filter by search term
+                if (searchTerm) {
+                    var term = searchTerm.toLowerCase();
+                    faqs = faqs.filter(function(faq) {
+                        return (faq.question || '').toLowerCase().indexOf(term) >= 0 ||
+                               (faq.answer || '').toLowerCase().indexOf(term) >= 0;
+                    });
+                }
+
+                if (faqs.length === 0) {
+                    listEl.innerHTML = '<div style="padding:12px;text-align:center;color:#999;" data-i18n="admin_pending_no_faq">暂无FAQ</div>';
+                    return;
+                }
+
+                var html = '';
+                for (var i = 0; i < faqs.length; i++) {
+                    var faq = faqs[i];
+                    html += '<div class="faq-link-item" data-faq-id="' + escapeHtml(faq.id) + '" style="padding:12px;border-bottom:1px solid #eee;cursor:pointer;">' +
+                        '<div style="font-weight:500;margin-bottom:4px;">' + escapeHtml(faq.question || '') + '</div>' +
+                        '<div style="font-size:0.85rem;color:#666;">' + escapeHtml((faq.answer || '').substring(0, 100)) + (faq.answer && faq.answer.length > 100 ? '...' : '') + '</div>' +
+                        '</div>';
+                }
+                listEl.innerHTML = html;
+
+                // Bind click events
+                var items = listEl.querySelectorAll('.faq-link-item');
+                for (var j = 0; j < items.length; j++) {
+                    (function(item) {
+                        item.addEventListener('click', function() {
+                            // Remove previous selection
+                            var prevSelected = listEl.querySelector('.faq-link-item-selected');
+                            if (prevSelected) prevSelected.classList.remove('faq-link-item-selected');
+
+                            // Add selection
+                            item.classList.add('faq-link-item-selected');
+                            item.style.background = '#e3f2fd';
+
+                            selectedFAQId = item.getAttribute('data-faq-id');
+                        });
+                    })(items[j]);
+                }
+            })
+            .catch(function(err) {
+                listEl.innerHTML = '<div style="padding:12px;text-align:center;color:#f44336;">' + (err.message || i18n.t('admin_doc_load_failed')) + '</div>';
+            });
+    }
+
+    window.submitLinkFAQ = function () {
+        var dialog = document.getElementById('admin-link-faq-dialog');
+        if (!dialog) return;
+
+        var questionId = dialog.getAttribute('data-question-id');
+        if (!questionId || !selectedFAQId) {
+            showAdminToast(i18n.t('admin_pending_select_faq_error'), 'error');
+            return;
+        }
+
+        var submitBtn = document.getElementById('link-faq-submit-btn');
+        setBtnLoading(submitBtn, i18n.t('admin_knowledge_submitting_btn'));
+
+        adminFetch('/api/pending/link-faq', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question_id: questionId,
+                faq_id: selectedFAQId
+            })
+        })
+        .then(function (res) {
+            if (!res.ok) throw new Error(i18n.t('admin_pending_link_faq_failed'));
+            showAdminToast(i18n.t('admin_pending_link_faq_success'), 'success');
+            closeLinkFAQDialog();
+            loadPendingQuestions();
+            selectedFAQId = null;
+        })
+        .catch(function (err) {
+            showAdminToast(err.message || i18n.t('admin_pending_link_faq_failed'), 'error');
         })
         .finally(function () {
             resetBtnLoading(submitBtn);
