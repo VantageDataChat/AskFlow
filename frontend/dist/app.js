@@ -3535,7 +3535,7 @@
         for (var n = 0; n < linkFaqBtns.length; n++) {
             (function(btn) {
                 btn.addEventListener('click', function() {
-                    showLinkFAQDialog(btn.getAttribute('data-id'), btn.getAttribute('data-question'));
+                    window.showLinkFAQDialog(btn.getAttribute('data-id'), btn.getAttribute('data-question'));
                 });
             })(linkFaqBtns[n]);
         }
