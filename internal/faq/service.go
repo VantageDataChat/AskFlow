@@ -33,7 +33,8 @@ type EmbedFunc func(text string) ([]float64, error)
 type SimilarityFunc func(a, b []float64) float64
 
 // SimilarityThreshold is the minimum cosine similarity to consider two questions as duplicates.
-const SimilarityThreshold = 0.85
+// Lowered from 0.85 to 0.80 for better Chinese text matching and FAQ merging.
+const SimilarityThreshold = 0.80
 
 // Service handles FAQ CRUD and weight tracking.
 type Service struct {
@@ -77,6 +78,7 @@ func (s *Service) RecordQuestion(productID, question string) error {
 	).Scan(&existingID)
 
 	if err == nil {
+		log.Printf("[FAQ] Level 1 text match: question=%q matched existing FAQ (id=%s)", question, existingID)
 		_, err = s.writeDB.Exec(
 			`UPDATE faq_entries SET weight = weight + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			existingID,
@@ -89,12 +91,15 @@ func (s *Service) RecordQuestion(productID, question string) error {
 
 	// Level 2: embedding similarity match (if configured)
 	if matchID := s.findSimilarByEmbedding(productID, question); matchID != "" {
+		log.Printf("[FAQ] Level 2 embedding match: question=%q matched FAQ (id=%s)", question, matchID)
 		_, err = s.writeDB.Exec(
 			`UPDATE faq_entries SET weight = weight + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 			matchID,
 		)
 		return err
 	}
+
+	log.Printf("[FAQ] No match found, creating new entry: question=%q", question)
 
 	// No match — create new entry
 	var maxOrder int
@@ -194,7 +199,8 @@ func (s *Service) findSimilarByEmbedding(productID, question string) string {
 	}
 
 	if bestScore >= SimilarityThreshold {
-		log.Printf("[FAQ] semantic merge: %.4f similarity for product=%s", bestScore, productID)
+		log.Printf("[FAQ] semantic merge: %.4f similarity (threshold=%.2f) for product=%s, question=%q",
+			bestScore, SimilarityThreshold, productID, question)
 		return bestID
 	}
 	return ""
@@ -329,8 +335,16 @@ func (s *Service) ListAll(productID string) ([]Entry, error) {
 }
 
 // Delete removes a FAQ entry by ID (admin operation).
+// Before deleting, it clears any pending questions linked to this FAQ.
 func (s *Service) Delete(id string) error {
-	_, err := s.writeDB.Exec(`DELETE FROM faq_entries WHERE id = ?`, id)
+	// Clear linked_faq_id from any pending questions that reference this FAQ
+	_, err := s.writeDB.Exec(`UPDATE pending_questions SET linked_faq_id = '' WHERE linked_faq_id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("failed to clear linked FAQ references: %w", err)
+	}
+
+	// Delete the FAQ entry
+	_, err = s.writeDB.Exec(`DELETE FROM faq_entries WHERE id = ?`, id)
 	return err
 }
 
@@ -386,11 +400,15 @@ func (s *Service) Reorder(ids []string) error {
 }
 
 // normalizeQuestion produces a canonical form for deduplication.
+// Enhanced normalization for better Chinese text matching.
 func normalizeQuestion(q string) string {
 	q = strings.ToLower(strings.TrimSpace(q))
-	fields := strings.Fields(q)
-	q = strings.Join(fields, " ")
-	q = strings.TrimRight(q, "?？。.!！")
+	// Remove all whitespace for better Chinese matching
+	q = strings.ReplaceAll(q, " ", "")
+	q = strings.ReplaceAll(q, "\t", "")
+	q = strings.ReplaceAll(q, "\n", "")
+	// Remove common punctuation
+	q = strings.TrimRight(q, "?？。.!！，,、；;：:")
 	return q
 }
 

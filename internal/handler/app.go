@@ -180,6 +180,11 @@ func (a *App) CreatePendingQuestion(question, userID, imageData, productID strin
 	return a.pendingManager.CreatePending(question, userID, imageData, productID)
 }
 
+// LinkPendingQuestionToFAQ links a pending question to a FAQ entry.
+func (a *App) LinkPendingQuestionToFAQ(questionID, faqID string) error {
+	return a.pendingManager.LinkFAQ(questionID, faqID)
+}
+
 // --- Authentication Interface ---
 
 // GetOAuthURL returns the OAuth authorization URL for the given provider.

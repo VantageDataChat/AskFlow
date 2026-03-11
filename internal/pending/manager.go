@@ -28,6 +28,7 @@ type PendingQuestion struct {
 	ImageData   string    `json:"image_data,omitempty"` // base64 data URL of attached image
 	ProductID   string    `json:"product_id"`
 	ProductName string    `json:"product_name"`
+	LinkedFAQID string    `json:"linked_faq_id,omitempty"` // ID of linked FAQ entry
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -161,7 +162,7 @@ func (pm *PendingQuestionManager) ListPending(status string, productID string) (
 	var rows *sql.Rows
 	var err error
 
-	baseSelect := `SELECT pq.id, pq.question, pq.user_id, COALESCE(u.name, '') AS user_name, pq.status, pq.answer, pq.image_data, pq.product_id, COALESCE(p.name, '') AS product_name, pq.created_at
+	baseSelect := `SELECT pq.id, pq.question, pq.user_id, COALESCE(u.name, '') AS user_name, pq.status, pq.answer, pq.image_data, pq.product_id, COALESCE(p.name, '') AS product_name, COALESCE(pq.linked_faq_id, '') AS linked_faq_id, pq.created_at
 		FROM pending_questions pq
 		LEFT JOIN products p ON pq.product_id = p.id
 		LEFT JOIN users u ON pq.user_id = u.id`
@@ -200,8 +201,9 @@ func (pm *PendingQuestionManager) ListPending(status string, productID string) (
 		var imageData sql.NullString
 		var userName sql.NullString
 		var productName sql.NullString
+		var linkedFAQID sql.NullString
 		var createdAt sql.NullTime
-		if err := rows.Scan(&q.ID, &q.Question, &q.UserID, &userName, &q.Status, &answer, &imageData, &q.ProductID, &productName, &createdAt); err != nil {
+		if err := rows.Scan(&q.ID, &q.Question, &q.UserID, &userName, &q.Status, &answer, &imageData, &q.ProductID, &productName, &linkedFAQID, &createdAt); err != nil {
 			return nil, fmt.Errorf("failed to scan pending question row: %w", err)
 		}
 		if answer.Valid {
@@ -212,6 +214,9 @@ func (pm *PendingQuestionManager) ListPending(status string, productID string) (
 		}
 		if userName.Valid && userName.String != "" {
 			q.UserName = userName.String
+		}
+		if linkedFAQID.Valid && linkedFAQID.String != "" {
+			q.LinkedFAQID = linkedFAQID.String
 		}
 		if createdAt.Valid {
 			q.CreatedAt = createdAt.Time
@@ -393,6 +398,121 @@ func (pm *PendingQuestionManager) AnswerQuestion(req AdminAnswerRequest) error {
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update pending question status: %w", err)
+	}
+
+	return nil
+}
+
+// LinkFAQ links a pending question to a FAQ entry.
+// When linked, it copies the FAQ's answer to the pending question and marks it as answered.
+// This ensures the answer persists even if the FAQ is later deleted.
+func (pm *PendingQuestionManager) LinkFAQ(questionID string, faqID string) error {
+	if questionID == "" {
+		return fmt.Errorf("question_id is required")
+	}
+	if faqID == "" {
+		return fmt.Errorf("faq_id is required")
+	}
+
+	// Get the pending question details
+	var pqQuestion, pqProductID string
+	err := pm.db.QueryRow(
+		`SELECT question, product_id FROM pending_questions WHERE id = ?`,
+		questionID,
+	).Scan(&pqQuestion, &pqProductID)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("pending question not found")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query pending question: %w", err)
+	}
+
+	// Get the FAQ question text (we'll use it to find the answer)
+	var faqQuestion string
+	err = pm.db.QueryRow(
+		`SELECT question FROM faq_entries WHERE id = ?`,
+		faqID,
+	).Scan(&faqQuestion)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("FAQ entry not found")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to query FAQ entry: %w", err)
+	}
+
+	// Try to find an existing answered pending question for this FAQ
+	// This would be a previous question that was manually answered and is now being reused
+	var existingAnswer, existingLLMAnswer sql.NullString
+	err = pm.db.QueryRow(
+		`SELECT answer, llm_answer FROM pending_questions WHERE id = ? AND status = 'answered'`,
+		faqID,
+	).Scan(&existingAnswer, &existingLLMAnswer)
+
+	// If no existing answer found, create a simple answer based on FAQ question
+	answerText := fmt.Sprintf("请参考FAQ：%s", faqQuestion)
+	llmAnswerText := answerText
+	if err == nil && existingAnswer.Valid && existingAnswer.String != "" {
+		answerText = existingAnswer.String
+		if existingLLMAnswer.Valid && existingLLMAnswer.String != "" {
+			llmAnswerText = existingLLMAnswer.String
+		}
+	}
+
+	// Update the pending question: set linked_faq_id, copy answer, mark as answered
+	now := time.Now().UTC()
+	_, err = pm.db.Exec(
+		`UPDATE pending_questions
+		 SET linked_faq_id = ?, answer = ?, llm_answer = ?, status = 'answered', answered_at = ?
+		 WHERE id = ?`,
+		faqID, answerText, llmAnswerText, now, questionID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to link FAQ: %w", err)
+	}
+
+	// Create vector embeddings for the linked answer so it can be searched
+	// Combine question and answer for better semantic matching
+	qaText := "Q: " + pqQuestion + "\nA: " + answerText
+	chunks := pm.chunker.Split(qaText, "pending-answer-"+questionID)
+
+	if len(chunks) > 0 {
+		texts := make([]string, len(chunks))
+		for i, c := range chunks {
+			texts[i] = c.Text
+		}
+
+		embeddings, embErr := pm.embeddingService.EmbedBatch(texts)
+		if embErr != nil {
+			log.Printf("Warning: failed to embed linked FAQ answer: %v", embErr)
+		} else {
+			// Insert document record
+			docName := "Linked FAQ Answer: " + truncate(pqQuestion, 50)
+			_, docErr := pm.db.Exec(
+				`INSERT OR REPLACE INTO documents (id, name, type, status, product_id, created_at)
+				 VALUES (?, ?, ?, ?, ?, ?)`,
+				"pending-answer-"+questionID, docName, "answer", "success", pqProductID, now,
+			)
+			if docErr != nil {
+				log.Printf("Warning: failed to insert document for linked FAQ: %v", docErr)
+			} else {
+				// Store vector chunks
+				vectorChunks := make([]vectorstore.VectorChunk, len(chunks))
+				for i, c := range chunks {
+					vectorChunks[i] = vectorstore.VectorChunk{
+						ChunkText:    c.Text,
+						ChunkIndex:   c.Index,
+						DocumentID:   "pending-answer-" + questionID,
+						DocumentName: docName,
+						Vector:       embeddings[i],
+						ProductID:    pqProductID,
+					}
+				}
+
+				if storeErr := pm.vectorStore.Store("pending-answer-"+questionID, vectorChunks); storeErr != nil {
+					log.Printf("Warning: failed to store linked FAQ vectors: %v", storeErr)
+				}
+			}
+		}
 	}
 
 	return nil

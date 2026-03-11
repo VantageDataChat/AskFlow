@@ -192,3 +192,46 @@ func HandlePendingByID(app *App) http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}
 }
+
+// HandlePendingLinkFAQ handles linking a pending question to a FAQ entry.
+func HandlePendingLinkFAQ(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		// Require admin session
+		_, _, err := GetAdminSession(app, r)
+		if err != nil {
+			WriteAdminSessionError(w, err)
+			return
+		}
+		var req struct {
+			QuestionID string `json:"question_id"`
+			FAQID      string `json:"faq_id"`
+		}
+		if err := ReadJSONBody(r, &req); err != nil {
+			WriteError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		// Shop owner isolation: verify the question belongs to the shop's product.
+		if middleware.IsShopOwner(r.Context()) {
+			pqProductID, pErr := app.GetPendingQuestionProductID(req.QuestionID)
+			if pErr != nil {
+				WriteError(w, http.StatusNotFound, "问题未找到")
+				return
+			}
+			if _, err := resolveProductID(r, pqProductID); err != nil {
+				WriteError(w, http.StatusForbidden, err.Error())
+				return
+			}
+		}
+		if err := app.LinkPendingQuestionToFAQ(req.QuestionID, req.FAQID); err != nil {
+			log.Printf("[Pending] link FAQ error: %v", err)
+			WriteError(w, http.StatusInternalServerError, "关联FAQ失败")
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}
+}
+

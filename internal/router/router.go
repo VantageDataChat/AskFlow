@@ -105,6 +105,7 @@ func Register(app *handler.App) func() {
 	// ── Pending questions ──
 	http.HandleFunc("/api/pending/answer", secureShop(handler.HandlePendingAnswer(app)))
 	http.HandleFunc("/api/pending/create", secureShop(handler.HandlePendingCreate(app)))
+	http.HandleFunc("/api/pending/link-faq", secureShop(handler.HandlePendingLinkFAQ(app)))
 	http.HandleFunc("/api/pending/", secureShop(handler.HandlePendingByID(app)))
 	http.HandleFunc("/api/pending", secureShop(handler.HandlePending(app)))
 

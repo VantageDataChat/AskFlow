@@ -388,6 +388,16 @@ func (qe *QueryEngine) QueryWithHistory(req QueryRequest, history []llm.HistoryM
 			}
 		}
 	}
+
+	// Step 0.5: Check if question matches a pending question with linked FAQ
+	if linkedFAQAnswer := qe.findLinkedFAQAnswer(req.Question, req.ProductID); linkedFAQAnswer != "" {
+		if debugMode {
+			dbg.Steps = append(dbg.Steps, "Step 0.5: found linked FAQ answer for similar pending question")
+		}
+		log.Printf("[Query] returning linked FAQ answer")
+		return &QueryResponse{Answer: linkedFAQAnswer, DebugInfo: dbg}, nil
+	}
+
 	if !skipIntentClassification {
 		intent, err := qe.classifyIntent(req.Question, ls, cfg)
 		if err == nil {
@@ -1313,6 +1323,83 @@ func (qe *QueryEngine) createPendingQuestion(question, userID, imageData, produc
 		id, question, userID, "pending", imageData, productID, time.Now().UTC(),
 	)
 	return err
+}
+
+// findLinkedFAQAnswer checks if the question matches a pending question with a linked FAQ.
+// If found, returns the FAQ's answer. Uses text similarity to match questions.
+func (qe *QueryEngine) findLinkedFAQAnswer(question string, productID string) string {
+	// Query pending questions with linked FAQs
+	query := `
+		SELECT pq.question, pq.linked_faq_id, faq.question
+		FROM pending_questions pq
+		JOIN faq_entries faq ON pq.linked_faq_id = faq.id
+		WHERE pq.linked_faq_id != ''
+		AND (pq.product_id = ? OR pq.product_id = '')
+		ORDER BY pq.created_at DESC
+		LIMIT 50
+	`
+
+	rows, err := qe.readDB.Query(query, productID)
+	if err != nil {
+		log.Printf("[Query] error querying linked FAQ questions: %v", err)
+		return ""
+	}
+	defer rows.Close()
+
+	type linkedQuestion struct {
+		pendingQ string
+		faqID    string
+		faqQ     string
+	}
+	var linkedQuestions []linkedQuestion
+
+	for rows.Next() {
+		var lq linkedQuestion
+		if err := rows.Scan(&lq.pendingQ, &lq.faqID, &lq.faqQ); err != nil {
+			continue
+		}
+		linkedQuestions = append(linkedQuestions, lq)
+	}
+
+	if len(linkedQuestions) == 0 {
+		return ""
+	}
+
+	// Check text similarity with pending questions
+	for _, lq := range linkedQuestions {
+		if textSimilarity(question, lq.pendingQ) >= 0.7 {
+			// Found a match, now get the FAQ answer from the document
+			var llmAnswer sql.NullString
+			docID := "pending-answer-" + lq.faqID
+			err := qe.readDB.QueryRow(
+				`SELECT llm_answer FROM pending_questions WHERE id = ? AND status = 'answered'`,
+				lq.faqID,
+			).Scan(&llmAnswer)
+
+			// If no answer in pending_questions, try to get from FAQ entry's cached answer
+			if err != nil || !llmAnswer.Valid || strings.TrimSpace(llmAnswer.String) == "" {
+				// Try to find the answer from the FAQ document chunks
+				var chunkText sql.NullString
+				err := qe.readDB.QueryRow(
+					`SELECT chunk_text FROM chunks WHERE document_id = ? ORDER BY chunk_index LIMIT 1`,
+					docID,
+				).Scan(&chunkText)
+				if err == nil && chunkText.Valid {
+					// Extract answer from "Q: ... A: ..." format
+					text := chunkText.String
+					if idx := strings.Index(text, "\nA: "); idx >= 0 {
+						return strings.TrimSpace(text[idx+4:])
+					}
+				}
+				continue
+			}
+
+			log.Printf("[Query] found linked FAQ answer via pending question similarity")
+			return llmAnswer.String
+		}
+	}
+
+	return ""
 }
 
 // isUnableToAnswer detects if the LLM response indicates it could not find
