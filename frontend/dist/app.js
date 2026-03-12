@@ -3754,13 +3754,9 @@
             // Create dialog if it doesn't exist
             dialog = document.createElement('div');
             dialog.id = 'admin-link-faq-dialog';
-            dialog.className = 'admin-dialog hidden';
-            dialog.innerHTML = '<div class="admin-dialog-content">' +
-                '<div class="admin-dialog-header">' +
+            dialog.className = 'admin-dialog-overlay hidden';
+            dialog.innerHTML = '<div class="admin-dialog" style="max-width:560px;max-height:85vh;overflow-y:auto;">' +
                 '<h3 data-i18n="admin_pending_link_faq_title">关联FAQ</h3>' +
-                '<button class="admin-dialog-close" onclick="closeLinkFAQDialog()">&times;</button>' +
-                '</div>' +
-                '<div class="admin-dialog-body">' +
                 '<div style="margin-bottom:12px;padding:12px;background:#f5f5f5;border-radius:6px;">' +
                 '<strong data-i18n="admin_pending_question_label">问题:</strong> <span id="link-faq-question-text"></span>' +
                 '</div>' +
@@ -3768,10 +3764,9 @@
                 '<input type="text" id="link-faq-search" placeholder="' + i18n.t('admin_pending_search_faq_placeholder') + '" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;" />' +
                 '</div>' +
                 '<div id="link-faq-list" style="max-height:300px;overflow-y:auto;border:1px solid #ddd;border-radius:4px;"></div>' +
-                '</div>' +
-                '<div class="admin-dialog-footer">' +
-                '<button class="btn-secondary" onclick="closeLinkFAQDialog()" data-i18n="admin_dialog_cancel">取消</button>' +
-                '<button id="link-faq-submit-btn" class="btn-primary" onclick="submitLinkFAQ()" data-i18n="admin_pending_link_faq_submit">确认关联</button>' +
+                '<div class="admin-dialog-actions">' +
+                '<button class="btn-secondary" onclick="window.closeLinkFAQDialog()" data-i18n="admin_dialog_cancel">取消</button>' +
+                '<button id="link-faq-submit-btn" class="btn-primary" onclick="window.submitLinkFAQ()" data-i18n="admin_pending_link_faq_submit">确认关联</button>' +
                 '</div>' +
                 '</div>';
             document.body.appendChild(dialog);
@@ -3892,7 +3887,7 @@
         .then(function (res) {
             if (!res.ok) throw new Error(i18n.t('admin_pending_link_faq_failed'));
             showAdminToast(i18n.t('admin_pending_link_faq_success'), 'success');
-            closeLinkFAQDialog();
+            window.closeLinkFAQDialog();
             loadPendingQuestions();
             selectedFAQId = null;
         })
